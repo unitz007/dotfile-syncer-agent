@@ -1,17 +1,13 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
-	"io"
-	"log"
+	"github.com/r3labs/sse/v2"
+	"github.com/spf13/cobra"
 	"net/http"
 	"os"
-	"os/exec"
 	"path"
 	"time"
-
-	"github.com/spf13/cobra"
 )
 
 func main() {
@@ -56,74 +52,51 @@ func main() {
 		Error("could not perform first start-up sync: ", err.Error())
 	}
 
+	// start server asynchronously
 	go func() {
 
-		cmd := exec.Command("smee", "--url", config.WebHook, "--path", "/webhook", "--port", config.Port)
-		stdOutput, err := cmd.StdoutPipe()
-		stdErr, err := cmd.StderrPipe()
+		mux := http.NewServeMux()
 
-		if err := cmd.Start(); err != nil {
-			Error(err.Error())
-			os.Exit(1)
-		}
-
-		if stdErr != nil {
-			buf := bufio.NewReader(stdErr)
-			line, _ := buf.ReadString('\n')
-			Error(line)
-			return
-		}
-
-		cmdOutput := io.MultiReader(stdOutput, stdErr)
-		bufOutput := bufio.NewReader(cmdOutput)
-		line, err := bufOutput.ReadString('\n')
-
-		for err == nil {
-			Info(line)
-			line, err = bufOutput.ReadString('\n')
-		}
+		// register handlers
+		mux.HandleFunc("/sync", syncHandler.Sync)
+		Info("Server started on port", *port)
+		Error(http.ListenAndServe(":"+*port, mux).Error())
 	}()
 
-	time.Sleep(3 * time.Second) // wait for smee server startup
+	client := sse.NewClient(config.WebHook)
+	Info("Listening on webhook url", *webhookUrl)
 
-	Info("webhook server forwarded successfully from", config.WebHook, "to port", config.Port)
+	err = client.Subscribe("message", func(msg *sse.Event) {
+		data := string(msg.Data)
+		if data != "{}" {
+			var commit GitWebHookCommitResponse
+			_ = json.Unmarshal([]byte(data), &commit)
+			if commit.Event == "push" {
+				Info("changes detected...")
 
-	mux := http.NewServeMux()
+				err := syncer.Sync(*dotFilePath, "Automatic")
+				if err != nil {
+					Info("error syncing on path:", *dotFilePath, err.Error())
+				} else {
+					t := &Commit{
+						Id:   commit.Body.HeadCommit.Id,
+						Time: "",
+					}
 
-	// register handlers
-	mux.HandleFunc("/sync", syncHandler.Sync)
-	mux.HandleFunc("/webhook", func(writer http.ResponseWriter, request *http.Request) {
+					syncStash := &SyncStash{
+						Commit: t,
+						Type:   "Automatic",
+						Time:   time.Now().UTC().Format(time.RFC3339),
+					}
 
-		var commit GitWebHookCommitResponse
-
-		err := json.NewDecoder(request.Body).Decode(&commit)
-		if err != nil {
-			Info(err.Error())
-		}
-
-		event := request.Header.Get("x-github-event")
-		if event == "push" {
-			Info("changes detected...")
-
-			err := syncer.Sync(*dotFilePath, "Automatic")
-			if err != nil {
-				Info("error syncing on path:", *dotFilePath, err.Error())
-			} else {
-				t := &Commit{
-					Id:   commit.HeadCommit.Id,
-					Time: "",
+					_ = db.Create(syncStash)
 				}
-
-				syncStash := &SyncStash{
-					Commit: t,
-					Type:   "Automatic",
-					Time:   time.Now().UTC().Format(time.RFC3339),
-				}
-
-				_ = db.Create(syncStash)
 			}
 		}
 	})
 
-	log.Fatal(http.ListenAndServe(":"+*port, mux))
+	if err != nil {
+		Error("Failed to subscribe to webhook: ", err.Error())
+		os.Exit(1)
+	}
 }

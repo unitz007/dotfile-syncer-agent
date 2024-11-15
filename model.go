@@ -6,9 +6,11 @@ type Commit struct {
 }
 
 type GitWebHookCommitResponse struct {
-	HeadCommit struct {
-		Id string `json:"id"`
-	} `json:"head_commit"`
+	Event string `json:"x-github-event"`
+	Body  struct {
+		Id         string `json:"id"`
+		HeadCommit Commit `json:"head_commit"`
+	} `json:"body"`
 }
 
 type GitPullTransform struct {

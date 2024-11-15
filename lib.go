@@ -35,9 +35,14 @@ func (s *Syncer) Sync(dotFilePath string, syncType string) error {
 		return fmt.Errorf("sync failed [git pull command failed with: %s]", err)
 	}
 
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
 	// `stow .` command
 	path, err = exec.LookPath("stow")
-	err = exec.Command(path, ".").Run()
+	err = exec.Command(path, ".", "-t", homeDir).Run()
 	if err != nil {
 		return fmt.Errorf("sync failed [stow execution failed: %v]", err)
 	}
