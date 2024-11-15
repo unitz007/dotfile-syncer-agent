@@ -54,7 +54,6 @@ func main() {
 
 	// start server asynchronously
 	go func() {
-
 		mux := http.NewServeMux()
 
 		// register handlers
