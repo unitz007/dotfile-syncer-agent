@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"github.com/r3labs/sse/v2"
+	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 func main() {
 
 	var (
+		cronJob                 = cron.New()
 		db                      = InitDB()
 		httpClient              = NewHttpClient()
 		rootCmd                 = cobra.Command{}
@@ -43,59 +45,59 @@ func main() {
 	}
 
 	syncer := &Syncer{config, db, httpClient}
-
 	syncHandler := NewSyncHandler(syncer, db, httpClient)
-
-	// first time sync
-	err := syncer.Sync(*dotFilePath, "Automatic")
-	if err != nil {
-		Error("could not perform first start-up sync: ", err.Error())
-	}
-
-	// start server asynchronously
-	go func() {
-		mux := http.NewServeMux()
-
-		// register handlers
-		mux.HandleFunc("/sync", syncHandler.Sync)
-		Info("Server started on port", *port)
-		Error(http.ListenAndServe(":"+*port, mux).Error())
-	}()
-
 	client := sse.NewClient(config.WebHook)
-	Info("Listening on webhook url", *webhookUrl)
+	//var event chan *sse.Event
 
-	err = client.Subscribe("message", func(msg *sse.Event) {
-		data := string(msg.Data)
-		if data != "{}" {
-			var commit GitWebHookCommitResponse
-			_ = json.Unmarshal([]byte(data), &commit)
-			if commit.Event == "push" {
-				Info("changes detected...")
+	go func() {
+		//_, _ = cronJob.AddFunc("@every 5s", func() {
+		//	fmt.Println(event)
+		//	client.Unsubscribe(event)
+		err := client.Subscribe("message", func(msg *sse.Event) {
+			//event = make(chan *sse.Event)
+			data := string(msg.Data)
+			if data != "{}" {
+				var commit GitWebHookCommitResponse
+				_ = json.Unmarshal([]byte(data), &commit)
+				if commit.Event == "push" {
+					Info("changes detected...")
 
-				err := syncer.Sync(*dotFilePath, "Automatic")
-				if err != nil {
-					Info("error syncing on path:", *dotFilePath, err.Error())
-				} else {
-					t := &Commit{
-						Id:   commit.Body.HeadCommit.Id,
-						Time: "",
+					err := syncer.Sync(*dotFilePath, "Automatic")
+					if err != nil {
+						Info("error syncing on path:", *dotFilePath, err.Error())
+					} else {
+						t := &Commit{
+							Id:   commit.Body.HeadCommit.Id,
+							Time: "",
+						}
+
+						syncStash := &SyncStash{
+							Commit: t,
+							Type:   "Automatic",
+							Time:   time.Now().UTC().Format(time.RFC3339),
+						}
+
+						_ = db.Create(syncStash)
 					}
-
-					syncStash := &SyncStash{
-						Commit: t,
-						Type:   "Automatic",
-						Time:   time.Now().UTC().Format(time.RFC3339),
-					}
-
-					_ = db.Create(syncStash)
 				}
 			}
-		}
-	})
+		})
 
-	if err != nil {
-		Error("Failed to subscribe to webhook: ", err.Error())
-		os.Exit(1)
-	}
+		if err != nil {
+			Error("Failed to subscribe to webhook: ", err.Error())
+		}
+		//})
+
+		cronJob.Start()
+
+		Info("Listening on webhook url", *webhookUrl)
+	}()
+
+	// server start
+	mux := http.NewServeMux()
+
+	// register handlers
+	mux.HandleFunc("/sync", syncHandler.Sync)
+	Info("Server started on port", *port)
+	Error(http.ListenAndServe(":"+*port, mux).Error())
 }
