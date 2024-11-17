@@ -83,16 +83,13 @@ func main() {
 						}
 					}
 				}
+
+				event[0] = nil
 			}()
 
-			err := client.Subscribe("message", func(msg *sse.Event) {
+			_ = client.Subscribe("message", func(msg *sse.Event) {
 				event[0] = msg
 			})
-
-			if err != nil {
-				Error("Failed to subscribe to webhook: ", err.Error())
-			}
-
 		})
 
 		cronJob.Start()
