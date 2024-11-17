@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	_ "encoding/json"
 	"github.com/r3labs/sse/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path"
 	"time"
+	_ "time"
 )
 
 func main() {
@@ -47,50 +49,56 @@ func main() {
 	syncer := &Syncer{config, db, httpClient}
 	syncHandler := NewSyncHandler(syncer, db, httpClient)
 	client := sse.NewClient(config.WebHook)
-	//var event chan *sse.Event
+	var event [1]*sse.Event
+
+	Info("Listening on webhook url", *webhookUrl)
 
 	go func() {
-		//_, _ = cronJob.AddFunc("@every 5s", func() {
-		//	fmt.Println(event)
-		//	client.Unsubscribe(event)
-		err := client.Subscribe("message", func(msg *sse.Event) {
-			//event = make(chan *sse.Event)
-			data := string(msg.Data)
-			if data != "{}" {
-				var commit GitWebHookCommitResponse
-				_ = json.Unmarshal([]byte(data), &commit)
-				if commit.Event == "push" {
-					Info("changes detected...")
+		_, _ = cronJob.AddFunc("@every 5s", func() {
+			go func() {
+				msg := event[0]
+				if msg != nil {
+					data := string(msg.Data)
+					if data != "{}" {
+						var commit GitWebHookCommitResponse
+						_ = json.Unmarshal([]byte(data), &commit)
+						if commit.Event == "push" {
+							Info("changes detected...")
 
-					err := syncer.Sync(*dotFilePath, "Automatic")
-					if err != nil {
-						Info("error syncing on path:", *dotFilePath, err.Error())
-					} else {
-						t := &Commit{
-							Id:   commit.Body.HeadCommit.Id,
-							Time: "",
+							err := syncer.Sync(*dotFilePath, "Automatic")
+							if err != nil {
+								Info("error syncing on path:", *dotFilePath, err.Error())
+							} else {
+								t := &Commit{
+									Id:   commit.Body.HeadCommit.Id,
+									Time: "",
+								}
+
+								syncStash := &SyncStash{
+									Commit: t,
+									Type:   "Automatic",
+									Time:   time.Now().UTC().Format(time.RFC3339),
+								}
+
+								_ = db.Create(syncStash)
+							}
 						}
-
-						syncStash := &SyncStash{
-							Commit: t,
-							Type:   "Automatic",
-							Time:   time.Now().UTC().Format(time.RFC3339),
-						}
-
-						_ = db.Create(syncStash)
 					}
 				}
-			}
-		})
+			}()
 
-		if err != nil {
-			Error("Failed to subscribe to webhook: ", err.Error())
-		}
-		//})
+			err := client.Subscribe("message", func(msg *sse.Event) {
+				event[0] = msg
+			})
+
+			if err != nil {
+				Error("Failed to subscribe to webhook: ", err.Error())
+			}
+
+		})
 
 		cronJob.Start()
 
-		Info("Listening on webhook url", *webhookUrl)
 	}()
 
 	// server start
