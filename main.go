@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	_ "encoding/json"
 	"github.com/r3labs/sse/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"path"
 	"time"
-	_ "time"
 )
 
 func main() {
