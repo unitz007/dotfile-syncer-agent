@@ -52,7 +52,7 @@ func main() {
 	Info("Listening on webhook url", *webhookUrl)
 
 	go func() {
-		_, _ = cronJob.AddFunc("@every s", func() {
+		_, _ = cronJob.AddFunc("@every 5s", func() {
 			//go func() {
 			msg := event[0]
 			if msg != nil {
