@@ -52,40 +52,40 @@ func main() {
 	Info("Listening on webhook url", *webhookUrl)
 
 	go func() {
-		_, _ = cronJob.AddFunc("@every 5s", func() {
-			go func() {
-				msg := event[0]
-				if msg != nil {
-					data := string(msg.Data)
-					if data != "{}" {
-						var commit GitWebHookCommitResponse
-						_ = json.Unmarshal([]byte(data), &commit)
-						if commit.Event == "push" {
-							Info("changes detected...")
+		_, _ = cronJob.AddFunc("@every s", func() {
+			//go func() {
+			msg := event[0]
+			if msg != nil {
+				data := string(msg.Data)
+				if data != "{}" {
+					var commit GitWebHookCommitResponse
+					_ = json.Unmarshal([]byte(data), &commit)
+					if commit.Event == "push" {
+						Info("changes detected...")
 
-							err := syncer.Sync(*dotFilePath, "Automatic")
-							if err != nil {
-								Info("error syncing on path:", *dotFilePath, err.Error())
-							} else {
-								t := &Commit{
-									Id:   commit.Body.HeadCommit.Id,
-									Time: "",
-								}
-
-								syncStash := &SyncStash{
-									Commit: t,
-									Type:   "Automatic",
-									Time:   time.Now().UTC().Format(time.RFC3339),
-								}
-
-								_ = db.Create(syncStash)
+						err := syncer.Sync(*dotFilePath, "Automatic")
+						if err != nil {
+							Info("error syncing on path:", *dotFilePath, err.Error())
+						} else {
+							t := &Commit{
+								Id:   commit.Body.HeadCommit.Id,
+								Time: "",
 							}
+
+							syncStash := &SyncStash{
+								Commit: t,
+								Type:   "Automatic",
+								Time:   time.Now().UTC().Format(time.RFC3339),
+							}
+
+							_ = db.Create(syncStash)
 						}
 					}
 				}
+			}
 
-				event[0] = nil
-			}()
+			event[0] = nil
+			//}()
 
 			_ = client.Subscribe("message", func(msg *sse.Event) {
 				event[0] = msg

@@ -46,7 +46,7 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 		} else {
 			writeResponse(writer, "Sync completed...", nil)
 		}
-	case http.MethodGet: // GET m
+	case http.MethodGet: // GET
 
 		syncStatus, err := s.db.Get(1)
 		if err != nil {
