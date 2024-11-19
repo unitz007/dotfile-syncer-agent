@@ -84,7 +84,6 @@ func main() {
 				}
 			}
 
-			event[0] = nil
 			//}()
 
 			_ = client.Subscribe("message", func(msg *sse.Event) {
