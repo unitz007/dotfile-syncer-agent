@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/r3labs/sse/v2"
 	"github.com/robfig/cron/v3"
@@ -12,7 +13,6 @@ import (
 )
 
 func main() {
-
 	var (
 		cronJob                 = cron.New()
 		db                      = InitDB()
@@ -47,48 +47,50 @@ func main() {
 	syncer := &Syncer{config, db, httpClient}
 	syncHandler := NewSyncHandler(syncer, db, httpClient)
 	client := sse.NewClient(config.WebHook)
-	var event [1]*sse.Event
 
 	Info("Listening on webhook url", *webhookUrl)
 
 	go func() {
 		_, _ = cronJob.AddFunc("@every 5s", func() {
-			//go func() {
-			msg := event[0]
-			if msg != nil {
-				data := string(msg.Data)
-				if data != "{}" {
-					var commit GitWebHookCommitResponse
-					_ = json.Unmarshal([]byte(data), &commit)
-					if commit.Event == "push" {
-						Info("changes detected...")
+			ctx, cancel := context.WithCancel(context.Background())
 
-						err := syncer.Sync(*dotFilePath, "Automatic")
-						if err != nil {
-							Info("error syncing on path:", *dotFilePath, err.Error())
-						} else {
-							t := &Commit{
-								Id:   commit.Body.HeadCommit.Id,
-								Time: "",
+			_ = client.SubscribeWithContext(ctx, "message", func(msg *sse.Event) {
+				if msg != nil {
+					data := string(msg.Data)
+					if data != "{}" {
+						var commit GitWebHookCommitResponse
+						_ = json.Unmarshal([]byte(data), &commit)
+						if commit.Event == "push" {
+							Info("changes detected...")
+
+							err := syncer.Sync(*dotFilePath, "Automatic")
+							if err != nil {
+								Info("error syncing on path:", *dotFilePath, err.Error())
+							} else {
+								t := &Commit{
+									Id:   commit.Body.HeadCommit.Id,
+									Time: "",
+								}
+
+								syncStash := &SyncStash{
+									Commit: t,
+									Type:   "Automatic",
+									Time:   time.Now().UTC().Format(time.RFC3339),
+								}
+
+								_ = db.Create(syncStash)
 							}
-
-							syncStash := &SyncStash{
-								Commit: t,
-								Type:   "Automatic",
-								Time:   time.Now().UTC().Format(time.RFC3339),
-							}
-
-							_ = db.Create(syncStash)
 						}
 					}
 				}
-			}
 
-			//}()
+				go func() {
+					time.Sleep(time.Second * 4)
+					cancel()
+				}()
 
-			_ = client.Subscribe("message", func(msg *sse.Event) {
-				event[0] = msg
 			})
+
 		})
 
 		cronJob.Start()
