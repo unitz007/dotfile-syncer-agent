@@ -18,6 +18,8 @@ func main() {
 		db                      = InitDB()
 		httpClient              = NewHttpClient()
 		rootCmd                 = cobra.Command{}
+		mux                     = http.NewServeMux()
+		server                  = sse.New()
 		defaultDotFileDirectory = func() string {
 			homeDir, err := os.UserConfigDir()
 			if err != nil {
@@ -45,8 +47,9 @@ func main() {
 	}
 
 	syncer := &Syncer{config, db, httpClient}
-	syncHandler := NewSyncHandler(syncer, db, httpClient)
+	syncHandler := NewSyncHandler(syncer, db, httpClient, server)
 	client := sse.NewClient(config.WebHook)
+	server.CreateStream("messages")
 
 	Info("Listening on webhook url", *webhookUrl)
 
@@ -61,7 +64,6 @@ func main() {
 						_ = json.Unmarshal([]byte(data), &commit)
 						if commit.Event == "push" {
 							Info("changes detected...")
-
 							err := syncer.Sync(*dotFilePath, "Automatic")
 							if err != nil {
 								Info("error syncing on path:", *dotFilePath, err.Error())
@@ -78,6 +80,11 @@ func main() {
 								}
 
 								_ = db.Create(syncStash)
+								streamBody, _ := json.Marshal(syncStash)
+								server.Publish(
+									"messages",
+									&sse.Event{Data: streamBody})
+
 							}
 						}
 					}
@@ -96,11 +103,9 @@ func main() {
 
 	}()
 
-	// server start
-	mux := http.NewServeMux()
-
 	// register handlers
 	mux.HandleFunc("/sync", syncHandler.Sync)
 	Info("Server started on port", *port)
 	Error(http.ListenAndServe(":"+*port, mux).Error())
+	os.Exit(1)
 }

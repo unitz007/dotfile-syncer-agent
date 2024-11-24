@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/r3labs/sse/v2"
 	"io"
 	"net/http"
 )
@@ -10,13 +11,19 @@ type SyncHandler struct {
 	syncer     *Syncer
 	db         Database
 	httpClient HttpClient
+	server     *sse.Server
 }
 
-func NewSyncHandler(syncer *Syncer, db Database, httpClient HttpClient) *SyncHandler {
+func NewSyncHandler(
+	syncer *Syncer,
+	db Database,
+	httpClient HttpClient,
+	server *sse.Server) *SyncHandler {
 	return &SyncHandler{
 		syncer,
 		db,
 		httpClient,
+		server,
 	}
 }
 
@@ -48,19 +55,27 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 		}
 	case http.MethodGet: // GET
 
-		syncStatus, err := s.db.Get(1)
-		if err != nil {
-			Error(err.Error())
-			return
+		if request.URL.Query().Get("stream") == "messages" {
+			go func() {
+				<-request.Context().Done()
+				return
+			}()
+			s.server.ServeHTTP(writer, request)
+		} else {
+			syncStatus, err := s.db.Get(1)
+			if err != nil {
+				Error(err.Error())
+				return
+			}
+
+			remoteCommit := remoteCommit(s.httpClient)
+
+			response := InitGitTransform(syncStatus.Commit, remoteCommit)
+			response.LastSyncTime = syncStatus.Time
+			response.LastSyncType = syncStatus.Type
+
+			writeResponse(writer, "sync details fetched successfully", response)
 		}
-
-		remoteCommit := remoteCommit(s.httpClient)
-
-		response := InitGitTransform(syncStatus.Commit, remoteCommit)
-		response.LastSyncTime = syncStatus.Time
-		response.LastSyncType = syncStatus.Type
-
-		writeResponse(writer, "sync details fetched successfully", response)
 	default:
 		writer.WriteHeader(http.StatusMethodNotAllowed)
 	}
