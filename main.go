@@ -53,7 +53,6 @@ func main() {
 	go func() {
 		_, _ = cronJob.AddFunc("@every 5s", func() {
 			ctx, cancel := context.WithCancel(context.Background())
-
 			_ = client.SubscribeWithContext(ctx, "message", func(msg *sse.Event) {
 				if msg != nil {
 					data := string(msg.Data)
