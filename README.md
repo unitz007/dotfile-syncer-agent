@@ -82,13 +82,13 @@ The application uses basic logging to provide info and error messages about its 
 - [robfig/cron](https://github.com/robfig/cron)
 - [spf13/cobra](https://github.com/spf13/cobra)
 
-## License
+[//]: # (## License)
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+[//]: # (This project is licensed under the MIT License - see the [LICENSE] file for details.)
 
-## Contributing
+[//]: # (## Contributing)
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+[//]: # (Please read [CONTRIBUTING.md]&#40;CONTRIBUTING.md&#41; for details on our code of conduct and the process for submitting pull requests.)
 
 ## Acknowledgments
 
