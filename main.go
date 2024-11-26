@@ -64,28 +64,27 @@ func main() {
 						_ = json.Unmarshal([]byte(data), &commit)
 						if commit.Event == "push" {
 							Info("changes detected...")
-							err := syncer.Sync(*dotFilePath, "Automatic")
-							if err != nil {
-								Info("error syncing on path:", *dotFilePath, err.Error())
-							} else {
-								t := &Commit{
-									Id:   commit.Body.HeadCommit.Id,
-									Time: "",
-								}
+							syncer.Sync(*dotFilePath, "Automatic", nil)
 
-								syncStash := &SyncStash{
-									Commit: t,
-									Type:   "Automatic",
-									Time:   time.Now().UTC().Format(time.RFC3339),
-								}
+							//Info("error syncing on path:", *dotFilePath, err.Error())
 
-								_ = db.Create(syncStash)
-								streamBody, _ := json.Marshal(syncStash)
-								server.Publish(
-									"messages",
-									&sse.Event{Data: streamBody})
-
+							t := &Commit{
+								Id:   commit.Body.HeadCommit.Id,
+								Time: "",
 							}
+
+							syncStash := &SyncStash{
+								Commit: t,
+								Type:   "Automatic",
+								Time:   time.Now().UTC().Format(time.RFC3339),
+							}
+
+							_ = db.Create(syncStash)
+							streamBody, _ := json.Marshal(syncStash)
+							server.Publish(
+								"messages",
+								&sse.Event{Data: streamBody})
+
 						}
 					}
 				}
