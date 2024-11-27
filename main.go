@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/r3labs/sse/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
@@ -49,14 +50,22 @@ func main() {
 	syncer := &Syncer{config, db, httpClient}
 	syncHandler := NewSyncHandler(syncer, db, httpClient, server)
 	client := sse.NewClient(config.WebHook)
-	server.CreateStream("messages")
+
+	// streams
+
+	syncStatus := "sync-status"
+	syncTrigger := "sync-trigger"
+
+	server.CreateStream(syncStatus)
+	server.CreateStream(syncTrigger)
 
 	Info("Listening on webhook url", *webhookUrl)
 
 	go func() {
 		_, _ = cronJob.AddFunc("@every 5s", func() {
 			ctx, cancel := context.WithCancel(context.Background())
-			_ = client.SubscribeWithContext(ctx, "message", func(msg *sse.Event) {
+			ch := make(chan SyncEvent)
+			_ = client.SubscribeWithContext(ctx, syncTrigger, func(msg *sse.Event) {
 				if msg != nil {
 					data := string(msg.Data)
 					if data != "{}" {
@@ -64,30 +73,48 @@ func main() {
 						_ = json.Unmarshal([]byte(data), &commit)
 						if commit.Event == "push" {
 							Info("changes detected...")
-							syncer.Sync(*dotFilePath, "Automatic", nil)
-
-							//Info("error syncing on path:", *dotFilePath, err.Error())
-
-							t := &Commit{
-								Id:   commit.Body.HeadCommit.Id,
-								Time: "",
+							go syncer.Sync(*dotFilePath, "Automatic", ch)
+							for x := range ch {
+								if !x.Data.IsSuccess {
+									msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
+									Error("Sync Failed: Could not", msg)
+								}
+								streamBody, _ := json.Marshal(x.Data)
+								server.Publish(
+									syncTrigger,
+									&sse.Event{Data: streamBody})
+								time.Sleep(1 * time.Second)
 							}
-
-							syncStash := &SyncStash{
-								Commit: t,
-								Type:   "Automatic",
-								Time:   time.Now().UTC().Format(time.RFC3339),
-							}
-
-							_ = db.Create(syncStash)
-							streamBody, _ := json.Marshal(syncStash)
-							server.Publish(
-								"messages",
-								&sse.Event{Data: streamBody})
-
 						}
 					}
 				}
+
+				//time.Sleep(1 * time.Second)
+				//syncStatus, err := db.Get(1)
+				//if err != nil {
+				//	Error(err.Error())
+				//	return
+				//}
+				//
+				//headCommit := func(c HttpClient) *Commit {
+				//	remoteCommitResponse, err := httpClient.GetCommits()
+				//	if err != nil {
+				//		Error(err.Error())
+				//		return nil
+				//	}
+				//
+				//	commit := remoteCommitResponse[0]
+				//
+				//	return &Commit{
+				//		Id: commit.Sha,
+				//	}
+				//}(httpClient)
+				//
+				//response := InitGitTransform(syncStatus.Commit, headCommit)
+				//response.LastSyncTime = syncStatus.Time
+				//response.LastSyncType = syncStatus.Type
+				//streamBody, _ := json.Marshal(response)
+				//server.Publish("yes", &sse.Event{Data: streamBody})
 
 				go func() {
 					time.Sleep(time.Second * 4)
@@ -95,12 +122,15 @@ func main() {
 				}()
 
 			})
-
 		})
 
 		cronJob.Start()
 
 	}()
+
+	//go func() {
+	//	client.Subscribe(syncStatus)
+	//}()
 
 	// register handlers
 	mux.HandleFunc("/sync", syncHandler.Sync)

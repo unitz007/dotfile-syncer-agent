@@ -14,7 +14,7 @@ type Syncer struct {
 
 func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 
-	constant := 11
+	constant := 12
 	progress := constant
 	event := SyncEvent{
 		Data: struct {
@@ -22,7 +22,8 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 			IsSuccess bool   `json:"isSuccess"`
 			Step      string `json:"step"`
 			Error     string `json:"error"`
-		}{Progress: 0, IsSuccess: true},
+			Done      bool   `json:"done"`
+		}{Progress: 0, IsSuccess: true, Done: false},
 	}
 
 	Info("Sync started...")
@@ -38,9 +39,9 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		return
 	}
 
-	progress += constant
 	event.Data.IsSuccess = true
-	event.Data.Progress = progress
+	event.Data.Progress += constant
+	event.Data.Done = false
 	ch <- event
 
 	// look up git
@@ -54,9 +55,9 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		return
 	}
 
-	progress += constant
 	event.Data.IsSuccess = true
-	event.Data.Progress = progress
+	event.Data.Progress += constant
+	event.Data.Done = false
 	ch <- event
 
 	// `git pull origin main` command
@@ -70,9 +71,9 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		return
 	}
 
-	progress += constant
 	event.Data.IsSuccess = true
-	event.Data.Progress = progress
+	event.Data.Progress += constant
+	event.Data.Done = false
 	ch <- event
 
 	event.Data.Step = "Get system home directory"
@@ -85,9 +86,9 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		return
 	}
 
-	progress += constant
 	event.Data.IsSuccess = true
-	event.Data.Progress = progress
+	event.Data.Progress += progress
+	event.Data.Done = false
 	ch <- event
 
 	// `stow .` command
@@ -101,9 +102,9 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		return
 	}
 
-	progress += constant
 	event.Data.IsSuccess = true
-	event.Data.Progress = progress
+	event.Data.Progress += constant
+	event.Data.Done = false
 	ch <- event
 
 	event.Data.Step = "Execute stow command"
@@ -116,9 +117,9 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		return
 	}
 
-	progress += constant
 	event.Data.IsSuccess = true
-	event.Data.Progress = progress
+	event.Data.Progress += progress
+	event.Data.Done = false
 	ch <- event
 
 	event.Data.Step = "Get github remote commits"
@@ -131,14 +132,12 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		return
 	}
 
-	progress += constant
 	event.Data.IsSuccess = true
-	event.Data.Progress = progress
+	event.Data.Progress += progress
+	event.Data.Done = false
 	ch <- event
 
 	headCommit := remoteCommits[0]
-
-	// update or create resource
 	commit := &Commit{
 		Id:   headCommit.Sha,
 		Time: "",
@@ -160,14 +159,13 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		return
 	}
 
-	progress += constant + 1
 	event.Data.IsSuccess = true
-	event.Data.Progress = progress
+	event.Data.Progress += constant + 4
+	event.Data.Done = true
 	ch <- event
 
 	Info("Sync completed...")
 	close(ch)
-	return
 }
 
 type SyncEvent struct {
@@ -176,5 +174,6 @@ type SyncEvent struct {
 		IsSuccess bool   `json:"isSuccess"`
 		Step      string `json:"step"`
 		Error     string `json:"error"`
+		Done      bool   `json:"done"`
 	} `json:"data"`
 }

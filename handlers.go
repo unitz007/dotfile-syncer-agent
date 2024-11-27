@@ -67,12 +67,38 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 			}()*/
 		}
 	case http.MethodGet: // GET
-		if request.URL.Query().Get("stream") == "messages" {
+		stream := request.URL.Query().Get("stream")
+		if stream == "sync-trigger" {
+			Info(request.UserAgent(), "is connected to stream")
 			go func() {
 				<-request.Context().Done()
 				return
 			}()
 			s.server.ServeHTTP(writer, request)
+		} else if stream == "sync-status" {
+			writer.Header().Set("Content-Type", "text/event-stream")
+			writer.Header().Set("Cache-Control", "no-cache")
+			writer.Header().Set("Connection", "keep-alive")
+			for {
+				syncStatus, err := s.db.Get(1)
+				if err != nil {
+					Error(err.Error())
+					return
+				}
+
+				remoteCommit := remoteCommit(s.httpClient)
+
+				response := InitGitTransform(syncStatus.Commit, remoteCommit)
+				response.LastSyncTime = syncStatus.Time
+				response.LastSyncType = syncStatus.Type
+
+				v, _ := json.Marshal(response)
+
+				_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
+				writer.(http.Flusher).Flush() // Send the event immediately
+
+				time.Sleep(30 * time.Second)
+			}
 		} else {
 			syncStatus, err := s.db.Get(1)
 			if err != nil {
@@ -86,7 +112,7 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 			response.LastSyncTime = syncStatus.Time
 			response.LastSyncType = syncStatus.Type
 
-			writeResponse(writer, "sync details fetched successfully", response)
+			writeResponse(writer, "Successful", response)
 		}
 	default:
 		writer.WriteHeader(http.StatusMethodNotAllowed)
