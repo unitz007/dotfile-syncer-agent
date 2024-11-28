@@ -60,21 +60,17 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 			_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
 			writer.(http.Flusher).Flush() // Send the event immediately
 			time.Sleep(1 * time.Second)   // Simulate periodic updates
-			/*	go func() {
-				<-request.Context().Done()
-				close(ch)
-				return
-			}()*/
 		}
 	case http.MethodGet: // GET
 		stream := request.URL.Query().Get("stream")
 		if stream == "sync-trigger" {
 			Info(request.UserAgent(), "is connected to stream")
+			s.server.ServeHTTP(writer, request)
 			go func() {
+				Info(request.UserAgent(), "disconnected from stream")
 				<-request.Context().Done()
 				return
 			}()
-			s.server.ServeHTTP(writer, request)
 		} else if stream == "sync-status" {
 			writer.Header().Set("Content-Type", "text/event-stream")
 			writer.Header().Set("Cache-Control", "no-cache")
