@@ -14,8 +14,70 @@ type Syncer struct {
 
 func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 
-	constant := 12
-	progress := constant
+	Info("Sync started...")
+
+	steps := []struct {
+		Step   string
+		Action func() error
+	}{
+		{
+			Step: "Execute Git pull command",
+			Action: func() error {
+				err := os.Chdir(dotFilePath)
+				if err != nil {
+					return err
+				}
+				path, err := exec.LookPath("git")
+				if err != nil {
+					return err
+				}
+
+				return exec.Command(path, "pull", "origin", "main", "--rebase").Run()
+			},
+		},
+		{
+			Step: "Execute Stow command",
+			Action: func() error {
+				homeDir, err := os.UserHomeDir()
+				if err != nil {
+					return err
+				}
+
+				path, err := exec.LookPath("stow")
+				if err != nil {
+					return err
+				}
+
+				return exec.Command(path, ".", "-t", homeDir).Run()
+
+			},
+		},
+		{
+			Step: "Finalize sync...",
+			Action: func() error {
+				remoteCommits, err := s.httpClient.GetCommits()
+				if err != nil {
+					return err
+				}
+
+				headCommit := remoteCommits[0]
+				commit := &Commit{
+					Id:   headCommit.Sha,
+					Time: "",
+				}
+
+				syncStash := SyncStash{
+					Commit: commit,
+					Type:   syncType,
+					Time:   time.Now().Format(time.RFC3339),
+				}
+
+				return s.db.Create(&syncStash)
+			},
+		},
+	}
+
+	constant := 100 / len(steps)
 	event := SyncEvent{
 		Data: struct {
 			Progress  int    `json:"progress"`
@@ -26,143 +88,35 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		}{Progress: 0, IsSuccess: true, Done: false},
 	}
 
-	Info("Sync started...")
-	ch <- event
+	for i, step := range steps {
+		event.Data.Step = step.Step
+		err := step.Action()
+		if err != nil {
+			event.Data.IsSuccess = false
+			event.Data.Error = err.Error()
+			ch <- event
+			close(ch)
+			return
+		}
 
-	event.Data.Step = "Change to dotfile directory"
-	err := os.Chdir(dotFilePath)
-	if err != nil {
-		event.Data.IsSuccess = false
-		event.Data.Error = err.Error()
+		event.Data.IsSuccess = true
+		event.Data.Progress += constant
+		event.Data.Step = step.Step
+		event.Data.Error = ""
+		if i == len(steps)-1 {
+			event.Data.Done = true
+			progress := event.Data.Progress
+			if progress != 100 {
+				event.Data.Progress += 100 - progress
+			}
+		}
+		event.Data.Done = func() bool {
+			return i == len(steps)-1
+		}()
+
 		ch <- event
-		close(ch)
-		return
+		time.Sleep(1 * time.Second)
 	}
-
-	event.Data.IsSuccess = true
-	event.Data.Progress += constant
-	event.Data.Done = false
-	ch <- event
-
-	// look up git
-	event.Data.Step = "Look-Up git executable"
-	path, err := exec.LookPath("git")
-	if err != nil {
-		event.Data.IsSuccess = false
-		event.Data.Error = err.Error()
-		ch <- event
-		close(ch)
-		return
-	}
-
-	event.Data.IsSuccess = true
-	event.Data.Progress += constant
-	event.Data.Done = false
-	ch <- event
-
-	// `git pull origin main` command
-	event.Data.Step = "Execute 'git pull' command"
-	err = exec.Command(path, "pull", "origin", "main", "--rebase").Run()
-	if err != nil {
-		event.Data.IsSuccess = false
-		event.Data.Error = err.Error()
-		ch <- event
-		close(ch)
-		return
-	}
-
-	event.Data.IsSuccess = true
-	event.Data.Progress += constant
-	event.Data.Done = false
-	ch <- event
-
-	event.Data.Step = "Get system home directory"
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		event.Data.IsSuccess = false
-		event.Data.Error = err.Error()
-		ch <- event
-		close(ch)
-		return
-	}
-
-	event.Data.IsSuccess = true
-	event.Data.Progress += progress
-	event.Data.Done = false
-	ch <- event
-
-	// `stow .` command
-	event.Data.Step = "Look-Up stow executable"
-	path, err = exec.LookPath("stow")
-	if err != nil {
-		event.Data.IsSuccess = false
-		event.Data.Error = err.Error()
-		ch <- event
-		close(ch)
-		return
-	}
-
-	event.Data.IsSuccess = true
-	event.Data.Progress += constant
-	event.Data.Done = false
-	ch <- event
-
-	event.Data.Step = "Execute stow command"
-	err = exec.Command(path, ".", "-t", homeDir).Run()
-	if err != nil {
-		event.Data.IsSuccess = false
-		event.Data.Error = err.Error()
-		ch <- event
-		close(ch)
-		return
-	}
-
-	event.Data.IsSuccess = true
-	event.Data.Progress += progress
-	event.Data.Done = false
-	ch <- event
-
-	event.Data.Step = "Get github remote commits"
-	remoteCommits, err := s.httpClient.GetCommits()
-	if err != nil {
-		event.Data.IsSuccess = false
-		event.Data.Error = err.Error()
-		ch <- event
-		close(ch)
-		return
-	}
-
-	event.Data.IsSuccess = true
-	event.Data.Progress += progress
-	event.Data.Done = false
-	ch <- event
-
-	headCommit := remoteCommits[0]
-	commit := &Commit{
-		Id:   headCommit.Sha,
-		Time: "",
-	}
-
-	syncStash := SyncStash{
-		Commit: commit,
-		Type:   syncType,
-		Time:   time.Now().Format(time.RFC3339),
-	}
-
-	event.Data.Step = "Persist git sync state"
-	err = s.db.Create(&syncStash)
-	if err != nil {
-		event.Data.IsSuccess = false
-		event.Data.Error = err.Error()
-		ch <- event
-		close(ch)
-		return
-	}
-
-	event.Data.IsSuccess = true
-	event.Data.Progress += constant + 4
-	event.Data.Done = true
-	ch <- event
 
 	Info("Sync completed...")
 	close(ch)
