@@ -6,6 +6,7 @@ import (
 	"github.com/r3labs/sse/v2"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -50,7 +51,9 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 		ch := make(chan SyncEvent)
 
 		go s.syncer.Sync(s.syncer.config.DotfilePath, "Manual", ch)
+		fmt.Print("Manual sync triggered===(0%)")
 		for x := range ch {
+			fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")
 			isSuccessful := x.Data.IsSuccess
 			if !isSuccessful {
 				msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
@@ -61,40 +64,25 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 			writer.(http.Flusher).Flush() // Send the event immediately
 			time.Sleep(1 * time.Second)   // Simulate periodic updates
 		}
+		fmt.Printf("===completed\n")
 	case http.MethodGet: // GET
 		stream := request.URL.Query().Get("stream")
-		if stream == "sync-trigger" {
-			Info(request.UserAgent(), "is connected to stream")
+		if stream == SyncTriggerLabel {
+			Info(request.UserAgent(), "is connected to", SyncTriggerLabel, "stream")
 			s.server.ServeHTTP(writer, request)
 			go func() {
-				Info(request.UserAgent(), "disconnected from stream")
+				Info(request.UserAgent(), "disconnected from", SyncTriggerLabel, "stream")
 				<-request.Context().Done()
 				return
 			}()
-		} else if stream == "sync-status" {
-			writer.Header().Set("Content-Type", "text/event-stream")
-			writer.Header().Set("Cache-Control", "no-cache")
-			writer.Header().Set("Connection", "keep-alive")
-			for {
-				syncStatus, err := s.db.Get(1)
-				if err != nil {
-					Error(err.Error())
-					return
-				}
-
-				remoteCommit := remoteCommit(s.httpClient)
-
-				response := InitGitTransform(syncStatus.Commit, remoteCommit)
-				response.LastSyncTime = syncStatus.Time
-				response.LastSyncType = syncStatus.Type
-
-				v, _ := json.Marshal(response)
-
-				_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
-				writer.(http.Flusher).Flush() // Send the event immediately
-
-				time.Sleep(30 * time.Second)
-			}
+		} else if stream == SyncStatusLabel {
+			Info(request.UserAgent(), "is connected to", SyncStatusLabel, "stream")
+			s.server.ServeHTTP(writer, request)
+			go func() {
+				Info(request.UserAgent(), "disconnected from", SyncStatusLabel, "stream")
+				<-request.Context().Done()
+				return
+			}()
 		} else {
 			syncStatus, err := s.db.Get(1)
 			if err != nil {

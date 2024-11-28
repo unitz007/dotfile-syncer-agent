@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"time"
 )
 
@@ -32,8 +33,8 @@ func main() {
 		}()
 	)
 
-	port := rootCmd.Flags().StringP("port", "p", "3000", "HTTP port to run on")
-	webhookUrl := rootCmd.Flags().StringP("webhook", "w", "https://smee.io/awFay3gs7LCGYe2", "git webhook url")
+	port := rootCmd.Flags().StringP("port", "p", DefaultPort, "HTTP port to run on")
+	webhookUrl := rootCmd.Flags().StringP("webhook", "w", DefaultSMEEUrl, "git webhook url")
 	dotFilePath := rootCmd.Flags().StringP("dotfile-path", "d", defaultDotFileDirectory, "path to dotfile directory")
 
 	if err := rootCmd.Execute(); err != nil {
@@ -50,38 +51,50 @@ func main() {
 	syncer := &Syncer{config, db, httpClient}
 	syncHandler := NewSyncHandler(syncer, db, httpClient, server)
 	client := sse.NewClient(config.WebHook)
+	remoteCommit := func(c HttpClient) *Commit {
+		remoteCommitResponse, err := httpClient.GetCommits()
+		if err != nil {
+			Error(err.Error())
+			return nil
+		}
 
-	// streams
-	syncStatus := "sync-status"
-	syncTrigger := "sync-trigger"
+		commit := remoteCommitResponse[0]
 
-	server.CreateStream(syncStatus)
-	stream := server.CreateStream(syncTrigger)
+		return &Commit{
+			Id: commit.Sha,
+		}
+	}
+
+	syncStatusStream := server.CreateStream(SyncStatusLabel)
+	syncTriggerStream := server.CreateStream(SyncTriggerLabel)
 
 	Info("Listening on webhook url", *webhookUrl)
 	go func() {
 		_, _ = cronJob.AddFunc("@every 5s", func() {
-			stream.Eventlog.Clear()
+			syncTriggerStream.Eventlog.Clear()
 			ctx, cancel := context.WithCancel(context.Background())
-			_ = client.SubscribeWithContext(ctx, syncTrigger, func(msg *sse.Event) {
+			_ = client.SubscribeWithContext(ctx, SyncStatusLabel, func(msg *sse.Event) {
 				if msg != nil {
 					data := string(msg.Data)
 					if data != "{}" {
 						var commit GitWebHookCommitResponse
 						_ = json.Unmarshal([]byte(data), &commit)
 						if commit.Event == "push" {
-							Info("changes detected...")
 							ch := make(chan SyncEvent)
 							go syncer.Sync(*dotFilePath, "Automatic", ch)
+							fmt.Print("Automatic sync triggered===(0%)")
+							status := "===completed"
 							for x := range ch {
+								fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")
 								if !x.Data.IsSuccess {
 									msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
-									Error("Sync Failed: Could not", msg)
+									status = fmt.Sprintf("===failed (%s)", msg)
 								}
 								streamBody, _ := json.Marshal(x.Data)
-								server.Publish(syncTrigger, &sse.Event{Data: streamBody})
+								server.Publish(SyncTriggerLabel, &sse.Event{Data: streamBody})
 								time.Sleep(1 * time.Second)
 							}
+							fmt.Printf("%s\n", status)
 						}
 					}
 				}
@@ -92,6 +105,24 @@ func main() {
 				}()
 
 			})
+		})
+		_, _ = cronJob.AddFunc("@every 30s", func() {
+			syncStatusStream.Eventlog.Clear()
+			syncStatus, err := db.Get(1)
+			if err != nil {
+				Error(err.Error())
+				return
+			}
+
+			remoteCommit := remoteCommit(httpClient)
+
+			response := InitGitTransform(syncStatus.Commit, remoteCommit)
+			response.LastSyncTime = syncStatus.Time
+			response.LastSyncType = syncStatus.Type
+
+			v, _ := json.Marshal(response)
+
+			server.Publish(SyncStatusLabel, &sse.Event{Data: v})
 		})
 
 		cronJob.Start()
