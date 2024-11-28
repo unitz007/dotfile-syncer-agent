@@ -19,7 +19,7 @@ func NewHttpClient() HttpClient {
 }
 
 func (c *httpClient) GetCommits() ([]GitHttpCommitResponse, error) {
-	request, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/unitz007/dotfiles/commits", nil)
+	request, err := http.NewRequest(http.MethodGet, DefaultGithubUrl, nil)
 	if err != nil {
 		return nil, err
 	}

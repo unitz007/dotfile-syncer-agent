@@ -14,8 +14,6 @@ type Syncer struct {
 
 func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 
-	Info("Sync started...")
-
 	steps := []struct {
 		Step   string
 		Action func() error
@@ -102,7 +100,6 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		event.Data.IsSuccess = true
 		event.Data.Progress += constant
 		event.Data.Step = step.Step
-		event.Data.Error = ""
 		if i == len(steps)-1 {
 			event.Data.Done = true
 			progress := event.Data.Progress
@@ -118,7 +115,6 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		time.Sleep(1 * time.Second)
 	}
 
-	Info("Sync completed...")
 	close(ch)
 }
 
