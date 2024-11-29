@@ -14,6 +14,32 @@ type Syncer struct {
 
 func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 
+	event1 := SyncEvent{
+		Data: struct {
+			Progress  int    `json:"progress"`
+			IsSuccess bool   `json:"isSuccess"`
+			Step      string `json:"step"`
+			Error     string `json:"error"`
+			Done      bool   `json:"done"`
+		}{Progress: 0, IsSuccess: true, Done: false},
+	}
+
+	NewSyncProcess(event1).
+		Add("Execute Git pull command", func() error {
+			err := os.Chdir(dotFilePath)
+			if err != nil {
+				return err
+			}
+			path, err := exec.LookPath("git")
+			if err != nil {
+				return err
+			}
+
+			return exec.Command(path, "pull", "origin", "main", "--rebase").Run()
+		}).
+		Add().
+		Add()
+
 	steps := []struct {
 		Step   string
 		Action func() error
@@ -100,7 +126,7 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		event.Data.IsSuccess = true
 		event.Data.Progress += constant
 		event.Data.Step = step.Step
-		if i == len(steps)-1 {
+		if i == len(steps)-1 { // on final step
 			event.Data.Done = true
 			progress := event.Data.Progress
 			if progress != 100 {
@@ -126,4 +152,46 @@ type SyncEvent struct {
 		Error     string `json:"error"`
 		Done      bool   `json:"done"`
 	} `json:"data"`
+}
+
+type SyncProcess struct {
+	ch    chan SyncEvent
+	event SyncEvent
+}
+
+func (s SyncProcess) Add(name string, action func() error) SyncProcess {
+	err := action()
+	if err != nil {
+		s.event.Data.IsSuccess = false
+		s.event.Data.Error = err.Error()
+		s.ch <- s.event
+		close(s.ch)
+		return s
+	}
+
+	s.event.Data.IsSuccess = true
+	s.event.Data.Progress += 10
+	s.event.Data.Step = name
+	//if  == len(s.ch)-1 { // on final step
+	//	event.Data.Done = true
+	//	progress := s.event.Data.Progress
+	//	if progress != 100 {
+	//		event.Data.Progress += 100 - progress
+	//	}
+	//}
+	s.event.Data.Done = func() bool {
+		return true
+	}()
+
+	s.ch <- s.event
+	time.Sleep(1 * time.Second)
+
+	return s
+}
+
+func NewSyncProcess(syncEvent SyncEvent) SyncProcess {
+	return SyncProcess{
+		ch:    make(chan SyncEvent),
+		event: syncEvent,
+	}
 }
