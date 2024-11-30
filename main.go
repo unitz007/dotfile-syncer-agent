@@ -18,10 +18,9 @@ func main() {
 	var (
 		cronJob                 = cron.New()
 		db                      = InitDB()
-		httpClient              = NewHttpClient()
 		rootCmd                 = cobra.Command{}
 		mux                     = http.NewServeMux()
-		server                  = sse.New()
+		sseServer               = sse.New()
 		defaultDotFileDirectory = func() string {
 			homeDir, err := os.UserConfigDir()
 			if err != nil {
@@ -46,11 +45,21 @@ func main() {
 		DotfilePath: *dotFilePath,
 		WebHook:     *webhookUrl,
 		Port:        *port,
+		GithubToken: func() string {
+			gitToken, ok := os.LookupEnv("GITHUB_TOKEN")
+			if !ok {
+				Error("No GITHUB_TOKEN environment variable found")
+				os.Exit(1)
+			}
+
+			return gitToken
+		}(),
 	}
 
+	httpClient := NewHttpClient(config)
 	syncer := &Syncer{config, db, httpClient}
-	syncHandler := NewSyncHandler(syncer, db, httpClient, server)
-	client := sse.NewClient(config.WebHook)
+	syncHandler := NewSyncHandler(syncer, db, httpClient, sseServer)
+	sseClient := sse.NewClient(config.WebHook)
 	remoteCommit := func(c HttpClient) *Commit {
 		remoteCommitResponse, err := httpClient.GetCommits()
 		if err != nil {
@@ -65,15 +74,15 @@ func main() {
 		}
 	}
 
-	syncStatusStream := server.CreateStream(SyncStatusLabel)
-	syncTriggerStream := server.CreateStream(SyncTriggerLabel)
+	syncStatusStream := sseServer.CreateStream(SyncStatusLabel)
+	syncTriggerStream := sseServer.CreateStream(SyncTriggerLabel)
 
 	Info("Listening on webhook url", *webhookUrl)
 	go func() {
 		_, _ = cronJob.AddFunc("@every 5s", func() {
 			syncTriggerStream.Eventlog.Clear()
 			ctx, cancel := context.WithCancel(context.Background())
-			_ = client.SubscribeWithContext(ctx, SyncStatusLabel, func(msg *sse.Event) {
+			_ = sseClient.SubscribeWithContext(ctx, SyncStatusLabel, func(msg *sse.Event) {
 				if msg != nil {
 					data := string(msg.Data)
 					if data != "{}" {
@@ -91,7 +100,7 @@ func main() {
 									status = fmt.Sprintf("===failed (%s)", msg)
 								}
 								streamBody, _ := json.Marshal(x.Data)
-								server.Publish(SyncTriggerLabel, &sse.Event{Data: streamBody})
+								sseServer.Publish(SyncTriggerLabel, &sse.Event{Data: streamBody})
 								time.Sleep(1 * time.Second)
 							}
 							fmt.Printf("%s\n", status)
@@ -122,7 +131,7 @@ func main() {
 
 			v, _ := json.Marshal(response)
 
-			server.Publish(SyncStatusLabel, &sse.Event{Data: v})
+			sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
 		})
 
 		cronJob.Start()

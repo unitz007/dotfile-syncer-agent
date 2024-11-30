@@ -2,20 +2,22 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
-	"os"
 )
 
 type HttpClient interface {
 	GetCommits() ([]GitHttpCommitResponse, error)
 }
 
-type httpClient struct{}
+type httpClient struct {
+	config *Config
+}
 
-func NewHttpClient() HttpClient {
-	return &httpClient{}
+func NewHttpClient(config *Config) HttpClient {
+	return &httpClient{
+		config: config,
+	}
 }
 
 func (c *httpClient) GetCommits() ([]GitHttpCommitResponse, error) {
@@ -24,11 +26,7 @@ func (c *httpClient) GetCommits() ([]GitHttpCommitResponse, error) {
 		return nil, err
 	}
 
-	gitToken, ok := os.LookupEnv("GITHUB_TOKEN")
-	if !ok {
-		return nil, errors.New("GITHUB_TOKEN environment variable not set")
-	}
-
+	gitToken := c.config.GithubToken
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("Authorization", "Bearer "+gitToken)
 

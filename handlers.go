@@ -58,13 +58,17 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 			if !isSuccessful {
 				msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
 				Error("Sync Failed: Could not", msg)
+				break
 			}
 			v, _ := json.Marshal(x.Data)
 			_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
 			writer.(http.Flusher).Flush() // Send the event immediately
-			time.Sleep(1 * time.Second)   // Simulate periodic updates
+			if x.Data.Done {
+				fmt.Printf("===completed\n")
+			}
+			time.Sleep(1 * time.Second) // Simulate periodic updates
 		}
-		fmt.Printf("===completed\n")
+
 	case http.MethodGet: // GET
 		stream := request.URL.Query().Get("stream")
 		if stream == SyncTriggerLabel {
