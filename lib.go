@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"time"
@@ -13,7 +17,6 @@ type Syncer struct {
 }
 
 func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
-
 	steps := []struct {
 		Step   string
 		Action func() error
@@ -76,6 +79,7 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 	}
 
 	constant := 100 / len(steps)
+	//var events []SyncEvent
 	event := SyncEvent{
 		Data: struct {
 			Progress  int    `json:"progress"`
@@ -92,14 +96,16 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		if err != nil {
 			event.Data.IsSuccess = false
 			event.Data.Error = err.Error()
+
+			go notifyBroker[SyncEvent](event)
 			ch <- event
+
 			close(ch)
 			return
 		}
 
 		event.Data.IsSuccess = true
 		event.Data.Progress += constant
-		event.Data.Step = step.Step
 		if i == len(steps)-1 { // on final step
 			event.Data.Done = true
 			progress := event.Data.Progress
@@ -107,15 +113,38 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 				event.Data.Progress += 100 - progress
 			}
 		}
-		event.Data.Done = func() bool {
-			return i == len(steps)-1
-		}()
 
+		go notifyBroker[SyncEvent](event)
 		ch <- event
-		time.Sleep(1 * time.Second)
+		time.Sleep(time.Second)
 	}
 
 	close(ch)
+}
+
+func notifyBroker[T any](payload T) {
+	machineId, mOk := os.LookupEnv("DOTFILE_MACHINE_ID")
+	brokerUrl, bOk := os.LookupEnv("DOTFILE_BROKER_URL")
+
+	if mOk && bOk {
+		go func() {
+			v, _ := json.Marshal(payload)
+			request, _ := http.NewRequest("POST", brokerUrl+"/sync-trigger/"+machineId+"/notify", bytes.NewBuffer(v))
+			request.Header.Set("Content-Type", "application/json")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				Error("Failed to send notification to broker:", err.Error())
+				return
+			}
+
+			if response.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(response.Body)
+				Error("Failed to send notification to broker:", string(body))
+				return
+			}
+		}()
+	}
+
 }
 
 type SyncEvent struct {

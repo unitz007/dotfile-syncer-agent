@@ -1,17 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/r3labs/sse/v2"
-	"github.com/robfig/cron/v3"
-	"github.com/spf13/cobra"
 	"net/http"
 	"os"
 	"path"
 	"strconv"
 	"time"
+
+	"github.com/r3labs/sse/v2"
+	"github.com/robfig/cron/v3"
+	"github.com/spf13/cobra"
 )
 
 func main() {
@@ -60,7 +62,7 @@ func main() {
 	syncer := &Syncer{config, db, httpClient}
 	syncHandler := NewSyncHandler(syncer, db, httpClient, sseServer)
 	sseClient := sse.NewClient(config.WebHook)
-	remoteCommit := func(c HttpClient) *Commit {
+	remoteCommit := func() *Commit {
 		remoteCommitResponse, err := httpClient.GetCommits()
 		if err != nil {
 			Error(err.Error())
@@ -112,10 +114,9 @@ func main() {
 					time.Sleep(time.Second * 4)
 					cancel()
 				}()
-
 			})
 		})
-		_, _ = cronJob.AddFunc("@every 30s", func() {
+		_, _ = cronJob.AddFunc("@every 10s", func() {
 			syncStatusStream.Eventlog.Clear()
 			syncStatus, err := db.Get(1)
 			if err != nil {
@@ -123,7 +124,7 @@ func main() {
 				return
 			}
 
-			remoteCommit := remoteCommit(httpClient)
+			remoteCommit := remoteCommit()
 
 			response := InitGitTransform(syncStatus.Commit, remoteCommit)
 			response.LastSyncTime = syncStatus.Time
@@ -132,6 +133,34 @@ func main() {
 			v, _ := json.Marshal(response)
 
 			sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
+			machineId, mOk := os.LookupEnv("DOTFILE_MACHINE_ID")
+			brokerUrl, bOk := os.LookupEnv("DOTFILE_BROKER_URL")
+
+			if mOk && bOk {
+				go func() {
+
+					request, _ := http.NewRequest("POST", brokerUrl+"/sync-status/"+machineId+"/notify", bytes.NewBuffer(v))
+					request.Header.Set("Content-Type", "application/json")
+					response, err := http.DefaultClient.Do(request)
+					if err != nil {
+						Error("Failed to send notification to broker:", err.Error())
+						return
+					}
+
+					if response.StatusCode != 200 {
+						Error("Failed to send notification to broker:", response.Status)
+					}
+
+					//if response.StatusCode != http.StatusOK {
+					//	body, _ := io.ReadAll(response.Body)
+					//	Error("Failed to send notification to broker:", string(body))
+					//} else {
+					//	Error("Failed to send notification to broker:", response.Status)
+					//
+					//}
+
+				}()
+			}
 		})
 
 		cronJob.Start()
