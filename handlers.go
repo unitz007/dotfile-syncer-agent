@@ -3,11 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/r3labs/sse/v2"
 	"io"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/r3labs/sse/v2"
 )
 
 type SyncHandler struct {
@@ -28,7 +29,7 @@ func NewSyncHandler(syncer *Syncer, db Database, httpClient HttpClient, server *
 
 func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("Content-Type", "application/json")
-	remoteCommit := func(c HttpClient) *Commit {
+	remoteCommit := func() *Commit {
 		remoteCommitResponse, err := s.httpClient.GetCommits()
 		if err != nil {
 			Error(err.Error())
@@ -58,13 +59,17 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 			if !isSuccessful {
 				msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
 				Error("Sync Failed: Could not", msg)
-				break
+				//return
 			}
 			v, _ := json.Marshal(x.Data)
 			_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
 			writer.(http.Flusher).Flush() // Send the event immediately
 			if x.Data.Done {
-				fmt.Printf("===completed\n")
+				time.Sleep(time.Second)
+				fmt.Printf("===completed")
+				time.Sleep(time.Second)
+				fmt.Println()
+
 			}
 			time.Sleep(1 * time.Second) // Simulate periodic updates
 		}
@@ -94,7 +99,7 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 				return
 			}
 
-			remoteCommit := remoteCommit(s.httpClient)
+			remoteCommit := remoteCommit()
 
 			response := InitGitTransform(syncStatus.Commit, remoteCommit)
 			response.LastSyncTime = syncStatus.Time
