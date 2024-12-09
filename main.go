@@ -116,7 +116,7 @@ func main() {
 				}()
 			})
 		})
-		_, _ = cronJob.AddFunc("@every 10s", func() {
+		_, _ = cronJob.AddFunc("@every 5s", func() {
 			syncStatusStream.Eventlog.Clear()
 			syncStatus, err := db.Get(1)
 			if err != nil {
@@ -132,13 +132,27 @@ func main() {
 
 			v, _ := json.Marshal(response)
 
+			// trigger auto sync if is not sync
+			if !response.IsSync {
+				var ch chan SyncEvent
+				go syncer.Sync(*dotFilePath, "Automatic", ch)
+				status := "===completed"
+				for x := range ch {
+					fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")
+					if !x.Data.IsSuccess {
+						msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
+						status = fmt.Sprintf("===failed (%s)", msg)
+					}
+				}
+				fmt.Printf("%s\n", status)
+			}
+
 			sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
 			machineId, mOk := os.LookupEnv("DOTFILE_MACHINE_ID")
 			brokerUrl, bOk := os.LookupEnv("DOTFILE_BROKER_URL")
 
 			if mOk && bOk {
 				go func() {
-
 					request, _ := http.NewRequest("POST", brokerUrl+"/sync-status/"+machineId+"/notify", bytes.NewBuffer(v))
 					request.Header.Set("Content-Type", "application/json")
 					response, err := http.DefaultClient.Do(request)
@@ -150,14 +164,6 @@ func main() {
 					if response.StatusCode != 200 {
 						Error("Failed to send notification to broker:", response.Status)
 					}
-
-					//if response.StatusCode != http.StatusOK {
-					//	body, _ := io.ReadAll(response.Body)
-					//	Error("Failed to send notification to broker:", string(body))
-					//} else {
-					//	Error("Failed to send notification to broker:", response.Status)
-					//
-					//}
 
 				}()
 			}
