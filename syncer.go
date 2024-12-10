@@ -1,19 +1,16 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"time"
 )
 
 type Syncer struct {
-	config     *Config
-	db         Database
-	httpClient HttpClient
+	config         *Config
+	Git            *Git
+	db             Database
+	brokerNotifier *BrokerNotifier
 }
 
 func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
@@ -50,36 +47,29 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 				}
 
 				return exec.Command(path, ".", "-t", homeDir).Run()
-
 			},
 		},
 		{
-			Step: "Finalize sync...",
+			Step: "Persisting Sync Details...",
 			Action: func() error {
-				remoteCommits, err := s.httpClient.GetCommits()
-				if err != nil {
-					return err
-				}
-
-				headCommit := remoteCommits[0]
-				commit := &Commit{
-					Id:   headCommit.Sha,
-					Time: "",
-				}
-
 				syncStash := SyncStash{
-					Commit: commit,
-					Type:   syncType,
-					Time:   time.Now().Format(time.RFC3339),
+					LastSyncType:   syncType,
+					LastSyncTime:   time.Now().Format(time.RFC3339),
+					LastSyncStatus: true,
 				}
 
 				return s.db.Create(&syncStash)
 			},
 		},
+		{
+			Step: "Finalizing Sync...",
+			Action: func() error {
+				return nil
+			},
+		},
 	}
 
 	constant := 100 / len(steps)
-	//var events []SyncEvent
 	event := SyncEvent{
 		Data: struct {
 			Progress  int    `json:"progress"`
@@ -97,7 +87,7 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 			event.Data.IsSuccess = false
 			event.Data.Error = err.Error()
 
-			go notifyBroker[SyncEvent](event)
+			s.brokerNotifier.SyncTrigger(event)
 			ch <- event
 
 			close(ch)
@@ -114,37 +104,12 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 			}
 		}
 
-		go notifyBroker[SyncEvent](event)
+		s.brokerNotifier.SyncTrigger(event)
 		ch <- event
 		time.Sleep(time.Second)
 	}
 
 	close(ch)
-}
-
-func notifyBroker[T any](payload T) {
-	machineId, mOk := os.LookupEnv("DOTFILE_MACHINE_ID")
-	brokerUrl, bOk := os.LookupEnv("DOTFILE_BROKER_URL")
-
-	if mOk && bOk {
-		go func() {
-			v, _ := json.Marshal(payload)
-			request, _ := http.NewRequest("POST", brokerUrl+"/sync-trigger/"+machineId+"/notify", bytes.NewBuffer(v))
-			request.Header.Set("Content-Type", "application/json")
-			response, err := http.DefaultClient.Do(request)
-			if err != nil {
-				Error("Failed to send notification to broker:", err.Error())
-				return
-			}
-
-			if response.StatusCode != http.StatusOK {
-				body, _ := io.ReadAll(response.Body)
-				Error("Failed to send notification to broker:", string(body))
-				return
-			}
-		}()
-	}
-
 }
 
 type SyncEvent struct {
