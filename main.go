@@ -142,16 +142,16 @@ func main() {
 				}
 			}
 
-			if !response.IsSync {
-				res, err := http.Post("http://localhost:"+config.Port+"/sync", "application/json", nil)
-				if err != nil {
-					Error("Failed to Auto sync:", err.Error())
-				}
-
-				if res.StatusCode != 200 {
-					Error("Failed to auto sync:", res.Status)
-				}
-			}
+			//if !response.IsSync {
+			//	res, err := http.Post("http://localhost:"+config.Port+"/sync", "application/json", nil)
+			//	if err != nil {
+			//		Error("Failed to Auto sync:", err.Error())
+			//	}
+			//
+			//	if res.StatusCode != 200 {
+			//		Error("Failed to auto sync:", res.Status)
+			//	}
+			//}
 		})
 
 		cronJob.Start()
