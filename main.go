@@ -1,7 +1,7 @@
 package main
 
 import (
-	"context"
+	//"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -69,40 +69,39 @@ func main() {
 
 	Info("Listening on webhook url", *webhookUrl)
 	go func() {
-		_, _ = cronJob.AddFunc("@every 5s", func() {
-			syncTriggerStream.Eventlog.Clear()
-			ctx, cancel := context.WithCancel(context.Background())
-			_ = sseClient.SubscribeWithContext(ctx, SyncStatusLabel, func(msg *sse.Event) {
-				if msg != nil {
-					data := string(msg.Data)
-					if data != "{}" {
-						var commit GitWebHookCommitResponse
-						_ = json.Unmarshal([]byte(data), &commit)
-						if commit.Event == "push" {
-							ch := make(chan SyncEvent)
-							go syncer.Sync(*dotFilePath, AutomaticSync, ch)
-							fmt.Print("Automatic sync triggered===(0%)")
-							status := "===completed"
-							for x := range ch {
-								fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")
-								if !x.Data.IsSuccess {
-									msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
-									status = fmt.Sprintf("===failed (%s)", msg)
-								}
-								streamBody, _ := json.Marshal(x.Data)
-								sseServer.Publish(SyncTriggerLabel, &sse.Event{Data: streamBody})
-								time.Sleep(1 * time.Second)
-							}
-							fmt.Printf("%s\n", status)
+		//ctx, cancel := context.WithCancel(context.Background())
+		_ = sseClient.SubscribeRaw(func(msg *sse.Event) {
+			if msg != nil {
+				data := string(msg.Data)
+				if data != "{}" {
+					var commit GitWebHookCommitResponse
+					_ = json.Unmarshal([]byte(data), &commit)
+					//if commit.Event == "push" {
+					ch := make(chan SyncEvent)
+					go syncer.Sync(*dotFilePath, AutomaticSync, ch)
+					fmt.Print("Automatic sync triggered===(0%)")
+					status := "===completed"
+					for x := range ch {
+						fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")
+						if !x.Data.IsSuccess {
+							msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
+							status = fmt.Sprintf("===failed (%s)", msg)
 						}
+						streamBody, _ := json.Marshal(x.Data)
+						sseServer.Publish(SyncTriggerLabel, &sse.Event{Data: streamBody})
+						time.Sleep(1 * time.Second)
 					}
+					fmt.Printf("%s\n", status)
+					syncTriggerStream.Eventlog.Clear()
 				}
-
-				go func() {
-					time.Sleep(time.Second * 4)
-					cancel()
-				}()
-			})
+				//}
+			}
+			//
+			//go func() {
+			//	time.Sleep(time.Second * 4)
+			//	cancel()
+			//}()
+			//})
 		})
 		_, _ = cronJob.AddFunc("@every 5s", func() {
 			if len(syncStatusStream.Eventlog) != 0 {
