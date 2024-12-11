@@ -65,13 +65,12 @@ func main() {
 
 	syncStatusStream := sseServer.CreateStream(SyncStatusLabel)
 	syncTriggerStream := sseServer.CreateStream(SyncTriggerLabel)
+	brokerNotifier.RegisterStream()
 
 	Info("Listening on webhook url", *webhookUrl)
 	go func() {
 		_, _ = cronJob.AddFunc("@every 5s", func() {
 			syncTriggerStream.Eventlog.Clear()
-			brokerNotifier.RegisterStream()
-
 			ctx, cancel := context.WithCancel(context.Background())
 			_ = sseClient.SubscribeWithContext(ctx, SyncStatusLabel, func(msg *sse.Event) {
 				if msg != nil {
