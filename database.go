@@ -31,7 +31,7 @@ func (db *docliteImpl) Get(id int) (*SyncStash, error) {
 		}
 	}
 
-	if syncStash.Commit == nil {
+	if syncStash == nil {
 		err = errors.New("not found")
 	}
 

@@ -12,17 +12,15 @@ import (
 )
 
 type SyncHandler struct {
-	syncer     *Syncer
-	db         Database
-	httpClient HttpClient
-	server     *sse.Server
+	syncer *Syncer
+	git    *Git
+	server *sse.Server
 }
 
-func NewSyncHandler(syncer *Syncer, db Database, httpClient HttpClient, server *sse.Server) *SyncHandler {
+func NewSyncHandler(syncer *Syncer, git *Git, server *sse.Server) *SyncHandler {
 	return &SyncHandler{
 		syncer,
-		db,
-		httpClient,
+		git,
 		server,
 	}
 }
@@ -30,17 +28,13 @@ func NewSyncHandler(syncer *Syncer, db Database, httpClient HttpClient, server *
 func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("Content-Type", "application/json")
 	remoteCommit := func() *Commit {
-		remoteCommitResponse, err := s.httpClient.GetCommits()
+		commit, err := s.git.RemoteCommit()
 		if err != nil {
 			Error(err.Error())
 			return nil
 		}
 
-		commit := remoteCommitResponse[0]
-
-		return &Commit{
-			Id: commit.Sha,
-		}
+		return commit
 	}
 
 	switch request.Method {
@@ -51,7 +45,7 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 
 		ch := make(chan SyncEvent)
 
-		go s.syncer.Sync(s.syncer.config.DotfilePath, "Manual", ch)
+		go s.syncer.Sync(s.syncer.config.DotfilePath, ManualSync, ch)
 		fmt.Print("Manual sync triggered===(0%)")
 		for x := range ch {
 			fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")
@@ -59,7 +53,6 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 			if !isSuccessful {
 				msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
 				Error("Sync Failed: Could not", msg)
-				//return
 			}
 			v, _ := json.Marshal(x.Data)
 			_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
@@ -77,23 +70,19 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 	case http.MethodGet: // GET
 		stream := request.URL.Query().Get("stream")
 		if stream == SyncTriggerLabel {
-			Info(request.UserAgent(), "is connected to", SyncTriggerLabel, "stream")
 			s.server.ServeHTTP(writer, request)
 			go func() {
-				Info(request.UserAgent(), "disconnected from", SyncTriggerLabel, "stream")
 				<-request.Context().Done()
 				return
 			}()
 		} else if stream == SyncStatusLabel {
-			Info(request.UserAgent(), "is connected to", SyncStatusLabel, "stream")
 			s.server.ServeHTTP(writer, request)
 			go func() {
-				Info(request.UserAgent(), "disconnected from", SyncStatusLabel, "stream")
 				<-request.Context().Done()
 				return
 			}()
 		} else {
-			syncStatus, err := s.db.Get(1)
+			localCommit, err := s.git.LocalCommit()
 			if err != nil {
 				Error(err.Error())
 				return
@@ -101,9 +90,8 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 
 			remoteCommit := remoteCommit()
 
-			response := InitGitTransform(syncStatus.Commit, remoteCommit)
-			response.LastSyncTime = syncStatus.Time
-			response.LastSyncType = syncStatus.Type
+			response := InitGitTransform(localCommit, remoteCommit)
+			response.LastSyncTime = localCommit.Time
 
 			writeResponse(writer, "Successful", response)
 		}
