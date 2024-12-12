@@ -133,20 +133,12 @@ func main() {
 				brokerNotifier.SyncStatus(response)
 			}
 		}
-
-		//if !response.IsSync {
-		//	res, err := http.Post("http://localhost:"+config.Port+"/sync", "application/json", nil)
-		//	if err != nil {
-		//		Error("Failed to Auto sync:", err.Error())
-		//	}
-		//
-		//	if res.StatusCode != 200 {
-		//		Error("Failed to auto sync:", res.Status)
-		//	}
-		//}
 	})
 
-	fmt.Println(err)
+	if err != nil {
+		Error(err.Error())
+		os.Exit(1)
+	}
 
 	cronJob.Start()
 
