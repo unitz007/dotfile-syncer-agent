@@ -53,7 +53,6 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 			if !isSuccessful {
 				msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
 				Error("Sync Failed: Could not", msg)
-				//return
 			}
 			v, _ := json.Marshal(x.Data)
 			_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
@@ -71,18 +70,14 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 	case http.MethodGet: // GET
 		stream := request.URL.Query().Get("stream")
 		if stream == SyncTriggerLabel {
-			Info(request.UserAgent(), "is connected to", SyncTriggerLabel, "stream")
 			s.server.ServeHTTP(writer, request)
 			go func() {
-				Info(request.UserAgent(), "disconnected from", SyncTriggerLabel, "stream")
 				<-request.Context().Done()
 				return
 			}()
 		} else if stream == SyncStatusLabel {
-			Info(request.UserAgent(), "is connected to", SyncStatusLabel, "stream")
 			s.server.ServeHTTP(writer, request)
 			go func() {
-				Info(request.UserAgent(), "disconnected from", SyncStatusLabel, "stream")
 				<-request.Context().Done()
 				return
 			}()
