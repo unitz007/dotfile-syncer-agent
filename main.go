@@ -69,14 +69,12 @@ func main() {
 
 	Info("Listening on webhook url", *webhookUrl)
 	go func() {
-		//ctx, cancel := context.WithCancel(context.Background())
 		_ = sseClient.SubscribeRaw(func(msg *sse.Event) {
 			if msg != nil {
 				data := string(msg.Data)
 				if data != "{}" {
 					var commit GitWebHookCommitResponse
 					_ = json.Unmarshal([]byte(data), &commit)
-					//if commit.Event == "push" {
 					ch := make(chan SyncEvent)
 					go syncer.Sync(*dotFilePath, AutomaticSync, ch)
 					fmt.Print("Automatic sync triggered===(0%)")
@@ -94,68 +92,63 @@ func main() {
 					fmt.Printf("%s\n", status)
 					syncTriggerStream.Eventlog.Clear()
 				}
-				//}
 			}
-			//
-			//go func() {
-			//	time.Sleep(time.Second * 4)
-			//	cancel()
-			//}()
-			//})
 		})
-		_, _ = cronJob.AddFunc("@every 5s", func() {
-			if len(syncStatusStream.Eventlog) != 0 {
-				event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
-				syncStatusStream.Eventlog = []*sse.Event{event}
-			}
+	}()
 
-			localCommit, err := git.LocalCommit()
-			if err != nil {
-				Error(err.Error())
-				return
-			}
+	_, err := cronJob.AddFunc("@every 5s", func() {
+		if len(syncStatusStream.Eventlog) != 0 {
+			event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
+			syncStatusStream.Eventlog = []*sse.Event{event}
+		}
 
-			remoteCommit, err := git.RemoteCommit()
-			if err != nil {
-				Error(err.Error())
-				return
-			}
+		localCommit, err := git.LocalCommit()
+		if err != nil {
+			Error(err.Error())
+			return
+		}
 
-			response := InitGitTransform(localCommit, remoteCommit)
-			v, _ := json.Marshal(response)
+		remoteCommit, err := git.RemoteCommit()
+		if err != nil {
+			Error(err.Error())
+			return
+		}
 
-			// first event
-			if len(syncStatusStream.Eventlog) == 0 {
+		response := InitGitTransform(localCommit, remoteCommit)
+		v, _ := json.Marshal(response)
+
+		// first event
+		if len(syncStatusStream.Eventlog) == 0 {
+			sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
+			brokerNotifier.SyncStatus(response)
+		} else {
+
+			event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
+
+			var prevResponse SyncStatusResponse
+			_ = json.Unmarshal(event.Data, &prevResponse)
+
+			if response.IsSync != prevResponse.IsSync {
 				sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
 				brokerNotifier.SyncStatus(response)
-			} else {
-
-				event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
-
-				var prevResponse SyncStatusResponse
-				_ = json.Unmarshal(event.Data, &prevResponse)
-
-				if response.IsSync != prevResponse.IsSync {
-					sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
-					brokerNotifier.SyncStatus(response)
-				}
 			}
+		}
 
-			//if !response.IsSync {
-			//	res, err := http.Post("http://localhost:"+config.Port+"/sync", "application/json", nil)
-			//	if err != nil {
-			//		Error("Failed to Auto sync:", err.Error())
-			//	}
-			//
-			//	if res.StatusCode != 200 {
-			//		Error("Failed to auto sync:", res.Status)
-			//	}
-			//}
-		})
+		//if !response.IsSync {
+		//	res, err := http.Post("http://localhost:"+config.Port+"/sync", "application/json", nil)
+		//	if err != nil {
+		//		Error("Failed to Auto sync:", err.Error())
+		//	}
+		//
+		//	if res.StatusCode != 200 {
+		//		Error("Failed to auto sync:", res.Status)
+		//	}
+		//}
+	})
 
-		cronJob.Start()
+	fmt.Println(err)
 
-	}()
+	cronJob.Start()
 
 	// register handlers
 	mux.HandleFunc("/sync", syncHandler.Sync)
