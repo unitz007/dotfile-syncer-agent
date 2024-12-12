@@ -35,7 +35,7 @@ func main() {
 	)
 
 	port := rootCmd.Flags().StringP("port", "p", DefaultPort, "HTTP port to run on")
-	webhookUrl := rootCmd.Flags().StringP("webhook", "w", DefaultSMEEUrl, "git webhook url")
+	webhookUrl := rootCmd.Flags().StringP("webhook", "w", DefaultWebHookUrl, "git webhook url")
 	dotFilePath := rootCmd.Flags().StringP("dotfile-path", "d", defaultDotFileDirectory, "path to dotfile directory")
 
 	if err := rootCmd.Execute(); err != nil {
