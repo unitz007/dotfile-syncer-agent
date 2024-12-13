@@ -67,9 +67,26 @@ func main() {
 	syncHandler := NewSyncHandler(syncer, git, sseServer)
 	sseClient := sse.NewClient(config.WebHook)
 
-	syncStatusStream := sseServer.CreateStream(SyncStatusLabel)
+	//syncStatusStream := sseServer.CreateStream(SyncStatusLabel)
 	syncTriggerStream := sseServer.CreateStream(SyncTriggerLabel)
 	brokerNotifier.RegisterStream()
+
+	notify := func(git *Git) {
+		localCommit, err := git.LocalCommit()
+		if err != nil {
+			Error(err.Error())
+			return
+		}
+
+		remoteCommit, err := git.RemoteCommit()
+		if err != nil {
+			Error(err.Error())
+			return
+		}
+
+		response := InitGitTransform(localCommit, remoteCommit)
+		brokerNotifier.SyncStatus(response)
+	}
 
 	Info("Listening on webhook url", *webhookUrl)
 	go func() {
@@ -79,6 +96,7 @@ func main() {
 				if msg != nil {
 					data := string(msg.Data)
 					if data != "{}" {
+						go notify(git)
 						var commit GitWebHookCommitResponse
 						_ = json.Unmarshal([]byte(data), &commit)
 						ch := make(chan SyncEvent)
@@ -96,6 +114,7 @@ func main() {
 							time.Sleep(1 * time.Second)
 						}
 						fmt.Printf("%s\n", status)
+						go notify(git)
 						syncTriggerStream.Eventlog.Clear()
 					}
 				}
@@ -107,50 +126,6 @@ func main() {
 			})
 		})
 	}()
-
-	_, err := cronJob.AddFunc("@every 5s", func() {
-		if len(syncStatusStream.Eventlog) != 0 {
-			event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
-			syncStatusStream.Eventlog = []*sse.Event{event}
-		}
-
-		localCommit, err := git.LocalCommit()
-		if err != nil {
-			Error(err.Error())
-			return
-		}
-
-		remoteCommit, err := git.RemoteCommit()
-		if err != nil {
-			Error(err.Error())
-			return
-		}
-
-		response := InitGitTransform(localCommit, remoteCommit)
-		v, _ := json.Marshal(response)
-
-		// first event
-		if len(syncStatusStream.Eventlog) == 0 {
-			sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
-			brokerNotifier.SyncStatus(response)
-		} else {
-
-			event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
-
-			var prevResponse SyncStatusResponse
-			_ = json.Unmarshal(event.Data, &prevResponse)
-
-			if response.IsSync != prevResponse.IsSync {
-				sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
-				brokerNotifier.SyncStatus(response)
-			}
-		}
-	})
-
-	if err != nil {
-		Error(err.Error())
-		os.Exit(1)
-	}
 
 	cronJob.Start()
 
