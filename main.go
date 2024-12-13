@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"sync"
+
 	//"context"
 	"encoding/json"
 	"fmt"
@@ -59,7 +62,8 @@ func main() {
 	}
 
 	git := &Git{config}
-	syncer := &Syncer{config, db, brokerNotifier}
+	syncMutex := &sync.Mutex{}
+	syncer := &Syncer{config, db, brokerNotifier, syncMutex}
 	syncHandler := NewSyncHandler(syncer, git, sseServer)
 	sseClient := sse.NewClient(config.WebHook)
 
@@ -69,30 +73,38 @@ func main() {
 
 	Info("Listening on webhook url", *webhookUrl)
 	go func() {
-		_ = sseClient.SubscribeRaw(func(msg *sse.Event) {
-			if msg != nil {
-				data := string(msg.Data)
-				if data != "{}" {
-					var commit GitWebHookCommitResponse
-					_ = json.Unmarshal([]byte(data), &commit)
-					ch := make(chan SyncEvent)
-					go syncer.Sync(*dotFilePath, AutomaticSync, ch)
-					fmt.Print("Automatic sync triggered===(0%)")
-					status := "===completed"
-					for x := range ch {
-						fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")
-						if !x.Data.IsSuccess {
-							msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
-							status = fmt.Sprintf("===failed (%s)", msg)
+		_, _ = cronJob.AddFunc("@every 5s", func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			_ = sseClient.SubscribeRawWithContext(ctx, func(msg *sse.Event) {
+				if msg != nil {
+					data := string(msg.Data)
+					if data != "{}" {
+						var commit GitWebHookCommitResponse
+						_ = json.Unmarshal([]byte(data), &commit)
+						ch := make(chan SyncEvent)
+						go syncer.Sync(*dotFilePath, AutomaticSync, ch)
+						fmt.Print("Automatic sync triggered===(0%)")
+						status := "===completed"
+						for x := range ch {
+							fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")
+							if !x.Data.IsSuccess {
+								msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
+								status = fmt.Sprintf("===failed (%s)", msg)
+							}
+							streamBody, _ := json.Marshal(x.Data)
+							sseServer.Publish(SyncTriggerLabel, &sse.Event{Data: streamBody})
+							time.Sleep(1 * time.Second)
 						}
-						streamBody, _ := json.Marshal(x.Data)
-						sseServer.Publish(SyncTriggerLabel, &sse.Event{Data: streamBody})
-						time.Sleep(1 * time.Second)
+						fmt.Printf("%s\n", status)
+						syncTriggerStream.Eventlog.Clear()
 					}
-					fmt.Printf("%s\n", status)
-					syncTriggerStream.Eventlog.Clear()
 				}
-			}
+
+				go func() {
+					time.Sleep(4 * time.Second)
+					cancel()
+				}()
+			})
 		})
 	}()
 

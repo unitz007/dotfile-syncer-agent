@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 )
 
@@ -10,9 +11,13 @@ type Syncer struct {
 	config         *Config
 	db             Database
 	brokerNotifier *BrokerNotifier
+	lock           *sync.Mutex
 }
 
 func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
+	defer s.lock.Unlock()
+
+	s.lock.Lock()
 	steps := []struct {
 		Step   string
 		Action func() error
