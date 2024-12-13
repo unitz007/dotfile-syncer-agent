@@ -59,7 +59,7 @@ func main() {
 	}
 
 	git := &Git{config}
-	syncer := &Syncer{config, git, db, brokerNotifier}
+	syncer := &Syncer{config, db, brokerNotifier}
 	syncHandler := NewSyncHandler(syncer, git, sseServer)
 	sseClient := sse.NewClient(config.WebHook)
 

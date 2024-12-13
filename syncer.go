@@ -8,7 +8,6 @@ import (
 
 type Syncer struct {
 	config         *Config
-	Git            *Git
 	db             Database
 	brokerNotifier *BrokerNotifier
 }
