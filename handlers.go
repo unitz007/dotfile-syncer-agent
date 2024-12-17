@@ -12,12 +12,12 @@ import (
 )
 
 type SyncHandler struct {
-	syncer *Syncer
+	syncer Syncer
 	git    *Git
 	server *sse.Server
 }
 
-func NewSyncHandler(syncer *Syncer, git *Git, server *sse.Server) *SyncHandler {
+func NewSyncHandler(syncer Syncer, git *Git, server *sse.Server) *SyncHandler {
 	return &SyncHandler{
 		syncer,
 		git,
@@ -45,7 +45,7 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 
 		ch := make(chan SyncEvent)
 
-		go s.syncer.Sync(s.syncer.config.DotfilePath, ManualSync, ch)
+		go s.syncer.Sync(ch)
 		fmt.Print("Manual sync triggered===(0%)")
 		for x := range ch {
 			fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")

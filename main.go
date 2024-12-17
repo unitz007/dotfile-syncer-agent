@@ -2,91 +2,55 @@ package main
 
 import (
 	"context"
-	"sync"
-
-	//"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"os"
-	"path"
-	"strconv"
-	"time"
-
 	"github.com/r3labs/sse/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
 )
 
 func main() {
 	var (
-		cronJob                 = cron.New()
-		db                      = InitDB()
-		rootCmd                 = cobra.Command{}
-		mux                     = http.NewServeMux()
-		sseServer               = sse.New()
-		brokerNotifier          = NewBrokerNotifier(os.Getenv("DOTFILE_MACHINE_ID"), os.Getenv("DOTFILE_BROKER_URL"))
-		defaultDotFileDirectory = func() string {
-			homeDir, err := os.UserConfigDir()
-			if err != nil {
-				Error("Unable to access home directory:", err.Error())
-				os.Exit(1)
-			}
-
-			return path.Join(homeDir, "dotfiles")
-		}()
+		cronJob           = cron.New()
+		rootCmd           = cobra.Command{}
+		mux               = http.NewServeMux()
+		sseServer         = sse.New()
+		brokerNotifier    = NewBrokerNotifier()
+		syncStatusStream  = sseServer.CreateStream(SyncStatusLabel)
+		syncTriggerStream = sseServer.CreateStream(SyncTriggerLabel)
+		port              = rootCmd.Flags().StringP("port", "p", DefaultPort, "HTTP port to run on")
+		webhookUrl        = rootCmd.Flags().StringP("webhook", "w", "", "git webhook url")
+		dotFilePath       = rootCmd.Flags().StringP("dotfile-path", "d", "", "path to dotfile directory")
+		configDir         = rootCmd.Flags().StringP("config-dir", "c", "", "path to config directory")
+		gitUrl            = rootCmd.Flags().StringP("git-url", "g", "", "github api url")
 	)
-
-	port := rootCmd.Flags().StringP("port", "p", DefaultPort, "HTTP port to run on")
-	webhookUrl := rootCmd.Flags().StringP("webhook", "w", DefaultWebHookUrl, "git webhook url")
-	dotFilePath := rootCmd.Flags().StringP("dotfile-path", "d", defaultDotFileDirectory, "path to dotfile directory")
 
 	if err := rootCmd.Execute(); err != nil {
 		Error(err.Error())
-		os.Exit(1)
+		return
 	}
 
-	config := &Config{
-		DotfilePath: *dotFilePath,
-		WebHook:     *webhookUrl,
-		Port:        *port,
-		GithubToken: func() string {
-			gitToken, ok := os.LookupEnv("GITHUB_TOKEN")
-			if !ok {
-				Error("No GITHUB_TOKEN environment variable found")
-				os.Exit(1)
-			}
+	config, err := InitializeConfigurations(*dotFilePath, *webhookUrl, *port, *configDir, *gitUrl)
+	if err != nil {
+		Error(err.Error())
+		return
+	}
 
-			return gitToken
-		}(),
+	persistence, err := InitializePersistence(config)
+	if err != nil {
+		Error(err.Error())
+		return
 	}
 
 	git := &Git{config}
-	syncMutex := &sync.Mutex{}
-	syncer := &Syncer{config, db, brokerNotifier, syncMutex}
+	syncer := NewSyncer(config, persistence, brokerNotifier)
 	syncHandler := NewSyncHandler(syncer, git, sseServer)
 	sseClient := sse.NewClient(config.WebHook)
-
-	//syncStatusStream := sseServer.CreateStream(SyncStatusLabel)
-	syncTriggerStream := sseServer.CreateStream(SyncTriggerLabel)
 	brokerNotifier.RegisterStream()
-
-	notify := func(git *Git) {
-		localCommit, err := git.LocalCommit()
-		if err != nil {
-			Error(err.Error())
-			return
-		}
-
-		remoteCommit, err := git.RemoteCommit()
-		if err != nil {
-			Error(err.Error())
-			return
-		}
-
-		response := InitGitTransform(localCommit, remoteCommit)
-		brokerNotifier.SyncStatus(response)
-	}
 
 	Info("Listening on webhook url", *webhookUrl)
 	go func() {
@@ -96,11 +60,10 @@ func main() {
 				if msg != nil {
 					data := string(msg.Data)
 					if data != "{}" {
-						go notify(git)
 						var commit GitWebHookCommitResponse
 						_ = json.Unmarshal([]byte(data), &commit)
 						ch := make(chan SyncEvent)
-						go syncer.Sync(*dotFilePath, AutomaticSync, ch)
+						go syncer.Sync(ch)
 						fmt.Print("Automatic sync triggered===(0%)")
 						status := "===completed"
 						for x := range ch {
@@ -114,7 +77,6 @@ func main() {
 							time.Sleep(1 * time.Second)
 						}
 						fmt.Printf("%s\n", status)
-						go notify(git)
 						syncTriggerStream.Eventlog.Clear()
 					}
 				}
@@ -123,6 +85,45 @@ func main() {
 					time.Sleep(4 * time.Second)
 					cancel()
 				}()
+
+				// check status
+				//if len(syncStatusStream.Eventlog) != 0 {
+				//	event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
+				//	syncStatusStream.Eventlog = []*sse.Event{event}
+				//}
+				//
+				localCommit, err := git.LocalCommit()
+				if err != nil {
+					Error(err.Error())
+					return
+				}
+
+				remoteCommit, err := git.RemoteCommit()
+				if err != nil {
+					Error(err.Error())
+					return
+				}
+
+				response := InitGitTransform(localCommit, remoteCommit)
+				v, _ := json.Marshal(response)
+
+				// first event
+				if len(syncStatusStream.Eventlog) == 0 {
+					sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
+					brokerNotifier.SyncStatus(response)
+				}
+
+				//
+				//	event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
+				//
+				//	var prevResponse SyncStatusResponse
+				//	_ = json.Unmarshal(event.Data, &prevResponse)
+				//
+				//	if response.IsSync != prevResponse.IsSync {
+				//		sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
+				//		brokerNotifier.SyncStatus(response)
+				//	}
+				//}
 			})
 		})
 	}()

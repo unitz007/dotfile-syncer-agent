@@ -7,17 +7,34 @@ import (
 	"time"
 )
 
-type Syncer struct {
-	config         *Config
-	db             Database
-	brokerNotifier *BrokerNotifier
-	lock           *sync.Mutex
+type Syncer interface {
+	Sync(ch chan SyncEvent)
+	//Rollback(commitId string, ch chan SyncEvent)
 }
 
-func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
-	defer s.lock.Unlock()
+type syncer struct {
+	config         *Configurations
+	db             Persistence
+	brokerNotifier *BrokerNotifier
+	mutex          *sync.Mutex
+}
 
-	s.lock.Lock()
+func NewSyncer(config *Configurations, db Persistence, brokerNotifier *BrokerNotifier) Syncer {
+	return &syncer{
+		config:         config,
+		db:             db,
+		brokerNotifier: brokerNotifier,
+		mutex:          &sync.Mutex{},
+	}
+}
+
+func (s *syncer) Sync(ch chan SyncEvent) {
+	defer func() {
+		s.mutex.Unlock()
+	}()
+
+	s.mutex.Lock()
+
 	steps := []struct {
 		Step   string
 		Action func() error
@@ -25,7 +42,7 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		{
 			Step: "Execute Git pull command",
 			Action: func() error {
-				err := os.Chdir(dotFilePath)
+				err := os.Chdir(s.config.DotfilePath)
 				if err != nil {
 					return err
 				}
@@ -56,13 +73,14 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		{
 			Step: "Persisting Sync Details...",
 			Action: func() error {
-				syncStash := SyncStash{
-					LastSyncType:   syncType,
-					LastSyncTime:   time.Now().Format(time.RFC3339),
-					LastSyncStatus: true,
-				}
-
-				return s.db.Create(&syncStash)
+				//	syncStash := SyncStash{
+				//		LastSyncType:   syncType,
+				//		LastSyncTime:   time.Now().Format(time.RFC3339),
+				//		LastSyncStatus: true,
+				//	}
+				//
+				//	return s.db.Create(&syncStash)
+				return nil
 			},
 		},
 		{
@@ -83,6 +101,8 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 			Done      bool   `json:"done"`
 		}{Progress: 0, IsSuccess: true, Done: false},
 	}
+
+	notify(&Git{s.config}, s.brokerNotifier)
 
 	for i, step := range steps {
 		event.Data.Step = step.Step
@@ -113,6 +133,7 @@ func (s *Syncer) Sync(dotFilePath string, syncType string, ch chan SyncEvent) {
 		time.Sleep(time.Second)
 	}
 
+	notify(&Git{s.config}, s.brokerNotifier)
 	close(ch)
 }
 
@@ -124,4 +145,21 @@ type SyncEvent struct {
 		Error     string `json:"error"`
 		Done      bool   `json:"done"`
 	} `json:"data"`
+}
+
+func notify(git *Git, brokerNotifier *BrokerNotifier) {
+	localCommit, err := git.LocalCommit()
+	if err != nil {
+		Error(err.Error())
+		return
+	}
+
+	remoteCommit, err := git.RemoteCommit()
+	if err != nil {
+		Error(err.Error())
+		return
+	}
+
+	response := InitGitTransform(localCommit, remoteCommit)
+	brokerNotifier.SyncStatus(response)
 }

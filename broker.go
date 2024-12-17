@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 )
 
 type BrokerNotifier struct {
@@ -13,7 +14,11 @@ type BrokerNotifier struct {
 	brokerUrl string
 }
 
-func NewBrokerNotifier(machine, brokerUrl string) *BrokerNotifier {
+func NewBrokerNotifier() *BrokerNotifier {
+
+	machine := os.Getenv("DOTFILE_MACHINE_ID")
+	brokerUrl := os.Getenv("DOTFILE_BROKER_URL")
+
 	return &BrokerNotifier{machine, brokerUrl}
 }
 
@@ -54,7 +59,6 @@ func (b BrokerNotifier) SyncStatus(payload any) {
 			if response.StatusCode != 200 {
 				Error("Failed to send notification to broker:", response.Status)
 			}
-
 		}()
 	}
 }
