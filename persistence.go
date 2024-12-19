@@ -1,10 +1,10 @@
 package main
 
 import (
-	"errors"
-	"github.com/haibeey/doclite"
 	"os"
 	"path/filepath"
+
+	"github.com/haibeey/doclite"
 )
 
 type Persistence interface {
@@ -32,9 +32,9 @@ func (db *docliteImpl) Get(id int) (*SyncStash, error) {
 		}
 	}
 
-	if syncStash == nil {
-		err = errors.New("not found")
-	}
+	// if syncStash == nil {
+	// 	err = errors.New("not found")
+	// }
 
 	return syncStash, err
 }

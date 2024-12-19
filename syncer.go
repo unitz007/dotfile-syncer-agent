@@ -3,20 +3,30 @@ package main
 import (
 	"os"
 	"os/exec"
-	"sync"
 	"time"
 )
 
 type Syncer interface {
-	Sync(ch chan SyncEvent)
+	Sync()
+	Consume(consumers ...func(syncEvent SyncEvent))
 	//Rollback(commitId string, ch chan SyncEvent)
+}
+
+type SyncEvent struct {
+	Data struct {
+		Progress  int    `json:"progress"`
+		IsSuccess bool   `json:"isSuccess"`
+		Step      string `json:"step"`
+		Error     string `json:"error"`
+		Done      bool   `json:"done"`
+	} `json:"data"`
 }
 
 type syncer struct {
 	config         *Configurations
 	db             Persistence
 	brokerNotifier *BrokerNotifier
-	mutex          *sync.Mutex
+	ch             chan SyncEvent
 }
 
 func NewSyncer(config *Configurations, db Persistence, brokerNotifier *BrokerNotifier) Syncer {
@@ -24,17 +34,11 @@ func NewSyncer(config *Configurations, db Persistence, brokerNotifier *BrokerNot
 		config:         config,
 		db:             db,
 		brokerNotifier: brokerNotifier,
-		mutex:          &sync.Mutex{},
+		ch:             make(chan SyncEvent),
 	}
 }
 
-func (s *syncer) Sync(ch chan SyncEvent) {
-	defer func() {
-		s.mutex.Unlock()
-	}()
-
-	s.mutex.Lock()
-
+func (s *syncer) Sync() {
 	steps := []struct {
 		Step   string
 		Action func() error
@@ -110,11 +114,8 @@ func (s *syncer) Sync(ch chan SyncEvent) {
 		if err != nil {
 			event.Data.IsSuccess = false
 			event.Data.Error = err.Error()
-
-			s.brokerNotifier.SyncTrigger(event)
-			ch <- event
-
-			close(ch)
+			s.ch <- event
+			close(s.ch)
 			return
 		}
 
@@ -127,24 +128,29 @@ func (s *syncer) Sync(ch chan SyncEvent) {
 				event.Data.Progress += 100 - progress
 			}
 		}
-
-		s.brokerNotifier.SyncTrigger(event)
-		ch <- event
+		s.ch <- event
 		time.Sleep(time.Second)
 	}
 
 	notify(&Git{s.config}, s.brokerNotifier)
-	close(ch)
+	close(s.ch)
 }
 
-type SyncEvent struct {
-	Data struct {
-		Progress  int    `json:"progress"`
-		IsSuccess bool   `json:"isSuccess"`
-		Step      string `json:"step"`
-		Error     string `json:"error"`
-		Done      bool   `json:"done"`
-	} `json:"data"`
+func (s *syncer) Consume(consumers ...func(event SyncEvent)) {
+
+	// default consumers
+	consumers = append(consumers, func(event SyncEvent) {
+		s.brokerNotifier.SyncTrigger(event)
+	})
+
+	for event := range s.ch {
+		for _, consumer := range consumers {
+			go consumer(event)
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	s.ch = make(chan SyncEvent)
 }
 
 func notify(git *Git, brokerNotifier *BrokerNotifier) {

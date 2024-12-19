@@ -3,14 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"net/http"
+	"os"
+	"time"
+
 	"github.com/r3labs/sse/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
-	"net/http"
-	"os"
-	"strconv"
-	"time"
 )
 
 func main() {
@@ -54,7 +53,7 @@ func main() {
 
 	Info("Listening on webhook url", *webhookUrl)
 	go func() {
-		_, _ = cronJob.AddFunc("@every 5s", func() {
+		for {
 			ctx, cancel := context.WithCancel(context.Background())
 			_ = sseClient.SubscribeRawWithContext(ctx, func(msg *sse.Event) {
 				if msg != nil {
@@ -62,22 +61,8 @@ func main() {
 					if data != "{}" {
 						var commit GitWebHookCommitResponse
 						_ = json.Unmarshal([]byte(data), &commit)
-						ch := make(chan SyncEvent)
-						go syncer.Sync(ch)
-						fmt.Print("Automatic sync triggered===(0%)")
-						status := "===completed"
-						for x := range ch {
-							fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")
-							if !x.Data.IsSuccess {
-								msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
-								status = fmt.Sprintf("===failed (%s)", msg)
-							}
-							streamBody, _ := json.Marshal(x.Data)
-							sseServer.Publish(SyncTriggerLabel, &sse.Event{Data: streamBody})
-							time.Sleep(1 * time.Second)
-						}
-						fmt.Printf("%s\n", status)
-						syncTriggerStream.Eventlog.Clear()
+						go syncer.Sync()
+						syncer.Consume(ConsoleSyncConsumer)
 					}
 				}
 
@@ -111,6 +96,13 @@ func main() {
 				if len(syncStatusStream.Eventlog) == 0 {
 					sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
 					brokerNotifier.SyncStatus(response)
+					if !response.IsSync {
+						go func() {
+							go syncer.Sync()
+							syncer.Consume(ConsoleSyncConsumer)
+							syncTriggerStream.Eventlog.Clear()
+						}()
+					}
 				}
 
 				//
@@ -125,7 +117,9 @@ func main() {
 				//	}
 				//}
 			})
-		})
+
+			time.Sleep(5 * time.Second)
+		}
 	}()
 
 	cronJob.Start()
