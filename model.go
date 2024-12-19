@@ -8,11 +8,8 @@ type Commit struct {
 }
 
 type GitWebHookCommitResponse struct {
-	Event string `json:"x-github-event"`
-	Body  struct {
-		Id         string `json:"id"`
-		HeadCommit Commit `json:"head_commit"`
-	} `json:"body"`
+	Ref        string `json:"ref"`
+	HeadCommit Commit `json:"head_commit"`
 }
 
 type SyncStatusResponse struct {

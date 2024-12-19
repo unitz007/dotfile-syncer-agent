@@ -1,19 +1,20 @@
 package main
 
 import (
-	"errors"
-	"github.com/haibeey/doclite"
 	"os"
 	"path/filepath"
+
+	"github.com/haibeey/doclite"
 )
 
-type Database interface {
+type Persistence interface {
 	Create(data *SyncStash) error
 	Get(id int) (*SyncStash, error)
 }
 
 type docliteImpl struct {
-	data *doclite.Doclite
+	data   *doclite.Doclite
+	config *Configurations
 }
 
 func (db *docliteImpl) Get(id int) (*SyncStash, error) {
@@ -31,36 +32,30 @@ func (db *docliteImpl) Get(id int) (*SyncStash, error) {
 		}
 	}
 
-	if syncStash == nil {
-		err = errors.New("not found")
-	}
+	// if syncStash == nil {
+	// 	err = errors.New("not found")
+	// }
 
 	return syncStash, err
 }
 
-func InitDB() Database {
+func InitializePersistence(config *Configurations) (Persistence, error) {
 
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		Error(err.Error())
-		os.Exit(1)
-	}
-
-	configDir = filepath.Join(configDir, "dotfile-syncer")
+	configDir := config.ConfigPath
 
 	if _, err := os.Stat(configDir); err != nil && os.IsNotExist(err) {
 		err = os.Mkdir(configDir, 0700)
 		if err != nil {
-			Error(err.Error())
-			os.Exit(1)
+			return nil, err
 		}
 	}
 
 	col := doclite.Connect(filepath.Join(configDir, "dotfile-agent.doclite"))
-
-	return &docliteImpl{
+	db := &docliteImpl{
 		data: col,
 	}
+
+	return db, nil
 
 }
 
