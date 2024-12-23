@@ -10,11 +10,11 @@ import (
 )
 
 type Git struct {
-	config *Config
+	config *Configurations
 }
 
 func (g Git) RemoteCommit() (*Commit, error) {
-	request, err := http.NewRequest(http.MethodGet, DefaultGithubUrl, nil)
+	request, err := http.NewRequest(http.MethodGet, g.config.GitUrl, nil)
 	if err != nil {
 		return nil, err
 	}

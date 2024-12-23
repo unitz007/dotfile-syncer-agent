@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
-	"time"
 
 	"github.com/r3labs/sse/v2"
 )
@@ -43,29 +41,15 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Cache-Control", "no-cache")
 		writer.Header().Set("Connection", "keep-alive")
 
-		ch := make(chan SyncEvent)
+		d := *s.syncer
 
-		go s.syncer.Sync(s.syncer.config.DotfilePath, ManualSync, ch)
-		fmt.Print("Manual sync triggered===(0%)")
-		for x := range ch {
-			fmt.Print("===(" + strconv.Itoa(x.Data.Progress) + "%)")
-			isSuccessful := x.Data.IsSuccess
-			if !isSuccessful {
-				msg := fmt.Sprintf("'%s': [%s]", x.Data.Step, x.Data.Error)
-				Error("Sync Failed: Could not", msg)
-			}
-			v, _ := json.Marshal(x.Data)
+		go d.Sync()
+		d.Consume(ConsoleSyncConsumer, func(event SyncEvent) {
+			data := event.Data
+			v, _ := json.Marshal(data)
 			_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
 			writer.(http.Flusher).Flush() // Send the event immediately
-			if x.Data.Done {
-				time.Sleep(time.Second)
-				fmt.Printf("===completed")
-				time.Sleep(time.Second)
-				fmt.Println()
-
-			}
-			time.Sleep(1 * time.Second) // Simulate periodic updates
-		}
+		})
 
 	case http.MethodGet: // GET
 		stream := request.URL.Query().Get("stream")

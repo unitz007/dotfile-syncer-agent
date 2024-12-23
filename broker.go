@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 )
 
 type BrokerNotifier struct {
@@ -13,28 +14,38 @@ type BrokerNotifier struct {
 	brokerUrl string
 }
 
-func NewBrokerNotifier(machine, brokerUrl string) *BrokerNotifier {
+func NewBrokerNotifier() *BrokerNotifier {
+
+	machine := os.Getenv("DOTFILE_MACHINE_ID")
+	brokerUrl := os.Getenv("DOTFILE_BROKER_URL")
+
+	if machine != "" || brokerUrl != "" {
+		Infoln("Broker notifier is enabled")
+	}
+
 	return &BrokerNotifier{machine, brokerUrl}
 }
 
-func (b BrokerNotifier) SyncTrigger(payload any) {
+func (b BrokerNotifier) SyncTrigger(payload SyncEvent) {
 	if b.machine != "" && b.brokerUrl != "" {
-		go func() {
-			v, _ := json.Marshal(payload)
-			request, err := http.NewRequest("POST", b.brokerUrl+"/sync-trigger/"+b.machine+"/notify", bytes.NewBuffer(v))
-			request.Header.Set("Content-Type", "application/json")
-			response, err := http.DefaultClient.Do(request)
-			if err != nil {
-				Error("Failed to send notification to broker:", err.Error())
-				return
-			}
+		v, _ := json.Marshal(payload)
+		request, err := http.NewRequest("POST", b.brokerUrl+"/sync-trigger/"+b.machine+"/notify", bytes.NewBuffer(v))
+		if err != nil {
+			Error("Failed to send notification to broker:", err.Error())
+			return
+		}
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			Error("Failed to send notification to broker:", err.Error())
+			return
+		}
 
-			if response.StatusCode != http.StatusOK {
-				body, _ := io.ReadAll(response.Body)
-				Error("Failed to send notification to broker:", string(body))
-				return
-			}
-		}()
+		if response.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(response.Body)
+			Error("Failed to send notification to broker:", string(body))
+			return
+		}
 	}
 }
 
@@ -54,7 +65,6 @@ func (b BrokerNotifier) SyncStatus(payload any) {
 			if response.StatusCode != 200 {
 				Error("Failed to send notification to broker:", response.Status)
 			}
-
 		}()
 	}
 }
