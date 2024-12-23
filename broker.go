@@ -20,7 +20,7 @@ func NewBrokerNotifier() *BrokerNotifier {
 	brokerUrl := os.Getenv("DOTFILE_BROKER_URL")
 
 	if machine != "" || brokerUrl != "" {
-		Info("Broker notifier is enabled")
+		Infoln("Broker notifier is enabled")
 	}
 
 	return &BrokerNotifier{machine, brokerUrl}

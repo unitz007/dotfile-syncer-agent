@@ -50,15 +50,15 @@ func InitializeConfigurations(
 	}
 
 	// ################## CONFIGURATIONS ##################
-	Info("Configuration Path ->", configPath)
-	Info("Dotfile Path ->", dotfilePath)
-	Info("Home Path ->", func() string {
+	Infoln("Configuration Path ->", configPath)
+	Infoln("Dotfile Path ->", dotfilePath)
+	Infoln("Home Path ->", func() string {
 		h, _ := os.UserHomeDir()
 		return h
 	}())
-	Info("WebHook ->", webHook)
-	Info("Git Url ->", gitUrl)
-	Info("Port ->", port)
+	Infoln("WebHook ->", webHook)
+	Infoln("Git Url ->", gitUrl)
+	Infoln("Port ->", port)
 	// #################################################
 
 	config := &Configurations{

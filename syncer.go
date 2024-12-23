@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 )
 
@@ -27,6 +28,7 @@ type syncer struct {
 	db             Persistence
 	brokerNotifier *BrokerNotifier
 	ch             chan SyncEvent
+	mutex          *sync.Mutex
 }
 
 func NewSyncer(config *Configurations, db Persistence, brokerNotifier *BrokerNotifier) Syncer {
@@ -35,10 +37,14 @@ func NewSyncer(config *Configurations, db Persistence, brokerNotifier *BrokerNot
 		db:             db,
 		brokerNotifier: brokerNotifier,
 		ch:             make(chan SyncEvent),
+		mutex:          &sync.Mutex{},
 	}
 }
 
 func (s *syncer) Sync() {
+
+	s.mutex.Lock()
+
 	steps := []struct {
 		Step   string
 		Action func() error
@@ -115,7 +121,6 @@ func (s *syncer) Sync() {
 			event.Data.IsSuccess = false
 			event.Data.Error = err.Error()
 			s.ch <- event
-			close(s.ch)
 			return
 		}
 
@@ -134,9 +139,16 @@ func (s *syncer) Sync() {
 
 	notify(&Git{s.config}, s.brokerNotifier)
 	close(s.ch)
+	s.ch = make(chan SyncEvent)
+	s.mutex.Unlock()
 }
 
 func (s *syncer) Consume(consumers ...func(event SyncEvent)) {
+
+	//if s.ch == nil {
+	//	Error("No channel available")
+	//	return
+	//}
 
 	// default consumers
 	consumers = append(consumers, func(event SyncEvent) {
@@ -150,7 +162,6 @@ func (s *syncer) Consume(consumers ...func(event SyncEvent)) {
 		time.Sleep(1 * time.Second)
 	}
 
-	s.ch = make(chan SyncEvent)
 }
 
 func notify(git *Git, brokerNotifier *BrokerNotifier) {

@@ -10,12 +10,12 @@ import (
 )
 
 type SyncHandler struct {
-	syncer Syncer
+	syncer *Syncer
 	git    *Git
 	server *sse.Server
 }
 
-func NewSyncHandler(syncer Syncer, git *Git, server *sse.Server) *SyncHandler {
+func NewSyncHandler(syncer *Syncer, git *Git, server *sse.Server) *SyncHandler {
 	return &SyncHandler{
 		syncer,
 		git,
@@ -41,11 +41,10 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Cache-Control", "no-cache")
 		writer.Header().Set("Connection", "keep-alive")
 
-		// ch := make(chan SyncEvent)
+		d := *s.syncer
 
-		go s.syncer.Sync()
-
-		s.syncer.Consume(ConsoleSyncConsumer, func(event SyncEvent) {
+		go d.Sync()
+		d.Consume(ConsoleSyncConsumer, func(event SyncEvent) {
 			data := event.Data
 			v, _ := json.Marshal(data)
 			_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
