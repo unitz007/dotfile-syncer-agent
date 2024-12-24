@@ -37,13 +37,27 @@ func InitializeConfigurations(
 		dotfilePath = path.Join(homeDir, "dotfiles")
 	}
 
-	if configPath == "" {
-		configPath, err := os.UserConfigDir()
-		if err != nil {
-			return nil, err
+	configPath = func() string {
+		if configPath == "" {
+			configPath, err := os.UserConfigDir()
+			if err != nil {
+				return ""
+			}
+
+			if _, err = os.Stat(path.Join(configPath, "dotfile-agent")); err != nil && os.IsNotExist(err) {
+				err := os.Mkdir(path.Join(configPath, "dotfile-agent"), 0700)
+				if err != nil {
+					return ""
+				}
+			} else {
+				return path.Join(configPath, "dotfile-agent")
+
+			}
+		} else {
 		}
-		configPath = configPath + "/dotfile-agent"
-	}
+		return configPath
+
+	}()
 
 	if gitUrl == "" {
 		return nil, errors.New("no git url provided")
