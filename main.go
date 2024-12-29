@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/r3labs/sse/v2"
+	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 func main() {
 	var (
+		cronJob           = cron.New()
 		rootCmd           = cobra.Command{}
 		mux               = http.NewServeMux()
 		sseServer         = sse.New()
@@ -51,83 +53,85 @@ func main() {
 
 	Infoln("Listening on webhook url", *webhookUrl)
 	go func() {
-		for {
-			go func() {
-				ctx, cancel := context.WithCancel(context.Background())
-				_ = sseClient.SubscribeRawWithContext(ctx, func(msg *sse.Event) {
-					if msg != nil {
-						data := string(msg.Data)
-						var commit *GitWebHookCommitResponse
-						err = json.Unmarshal([]byte(data), &commit)
-						if err != nil {
-							return
-						}
-
-						commitRef := commit.Ref
-						if commitRef == "" {
-							return
-						}
-
-						branch := strings.Split(commitRef, "/")[2]
-						if branch == "main" { // only triggers sync on push to main branch
-							go syncer.Sync()
-							syncer.Consume(ConsoleSyncConsumer)
-						}
-					}
-
-					go func() {
-						time.Sleep(4 * time.Second)
-						cancel()
-					}()
-
-					//check status
-					if len(syncStatusStream.Eventlog) != 0 {
-						event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
-						syncStatusStream.Eventlog = []*sse.Event{event}
-					}
-
-					localCommit, err := git.LocalCommit()
+		_, _ = cronJob.AddFunc("@every 5s", func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			_ = sseClient.SubscribeRawWithContext(ctx, func(msg *sse.Event) {
+				if msg != nil {
+					data := string(msg.Data)
+					var commit *GitWebHookCommitResponse
+					err = json.Unmarshal([]byte(data), &commit)
 					if err != nil {
-						Error(err.Error())
 						return
 					}
 
-					remoteCommit, err := git.RemoteCommit()
-					if err != nil {
-						Error(err.Error())
+					commitRef := commit.Ref
+					if commitRef == "" {
 						return
 					}
 
-					response := InitGitTransform(localCommit, remoteCommit)
-					if !response.IsSync {
-						go func() {
-							go syncer.Sync()
-							syncer.Consume(ConsoleSyncConsumer)
-							syncTriggerStream.Eventlog.Clear()
-						}()
+					branch := strings.Split(commitRef, "/")[2]
+					if branch == "main" { // only triggers sync on push to main branch
+						go syncer.Sync()
+						syncer.Consume(ConsoleSyncConsumer)
 					}
-					v, _ := json.Marshal(response)
+				}
 
-					// first event
-					if len(syncStatusStream.Eventlog) == 0 {
-						sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
-						brokerNotifier.SyncStatus(response)
-					} else {
+				go func() {
+					time.Sleep(4 * time.Second)
+					cancel()
+				}()
 
-						event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
+			})
+		})
 
-						var prevResponse SyncStatusResponse
-						_ = json.Unmarshal(event.Data, &prevResponse)
+		_, _ = cronJob.AddFunc("@every 10bm", func() {
+			//check status
+			if len(syncStatusStream.Eventlog) != 0 {
+				event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
+				syncStatusStream.Eventlog = []*sse.Event{event}
+			}
 
-						if response.IsSync != prevResponse.IsSync {
-							sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
-							brokerNotifier.SyncStatus(response)
-						}
-					}
-				})
-			}()
-			time.Sleep(5 * time.Second)
-		}
+			localCommit, err := git.LocalCommit()
+			if err != nil {
+				Error(err.Error())
+				return
+			}
+
+			remoteCommit, err := git.RemoteCommit()
+			if err != nil {
+				Error(err.Error())
+				return
+			}
+
+			response := InitGitTransform(localCommit, remoteCommit)
+			if !response.IsSync {
+				go func() {
+					go syncer.Sync()
+					syncer.Consume(ConsoleSyncConsumer)
+					syncTriggerStream.Eventlog.Clear()
+				}()
+			}
+			v, _ := json.Marshal(response)
+
+			// first event
+			if len(syncStatusStream.Eventlog) == 0 {
+				sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
+				brokerNotifier.SyncStatus(response)
+			} else {
+
+				event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
+
+				var prevResponse SyncStatusResponse
+				_ = json.Unmarshal(event.Data, &prevResponse)
+
+				if response.IsSync != prevResponse.IsSync {
+					sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
+					brokerNotifier.SyncStatus(response)
+				}
+			}
+		})
+
+		cronJob.Start()
 	}()
 
 	// register handlers
