@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"github.com/r3labs/sse/v2"
-	"github.com/spf13/cobra"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/r3labs/sse/v2"
+	"github.com/spf13/cobra"
 )
 
 func main() {
@@ -37,14 +39,17 @@ func main() {
 		return
 	}
 
-	persistence, err := InitializePersistence(config)
-	if err != nil {
-		Error(err.Error())
-		return
-	}
+	fmt.Println("")
+
+	//persistence, err := InitializePersistence(config)
+	//if err != nil {
+	//	Error(err.Error())
+	//	return
+	//}
 
 	git := &Git{config}
-	syncer := NewSyncer(config, persistence, brokerNotifier)
+	syncer := NewCustomSync(config)
+	syncer.Sync()
 	syncHandler := NewSyncHandler(&syncer, git, sseServer)
 	sseClient := sse.NewClient(config.WebHook)
 	brokerNotifier.RegisterStream()

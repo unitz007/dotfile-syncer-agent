@@ -7,9 +7,11 @@ import (
 	"time"
 )
 
+type Consumer func(syncEvent SyncEvent)
+
 type Syncer interface {
 	Sync()
-	Consume(consumers ...func(syncEvent SyncEvent))
+	Consume(consumers ...Consumer)
 	//Rollback(commitId string, ch chan SyncEvent)
 }
 
@@ -143,7 +145,7 @@ func (s *syncer) Sync() {
 	s.mutex.Unlock()
 }
 
-func (s *syncer) Consume(consumers ...func(event SyncEvent)) {
+func (s *syncer) Consume(consumers ...Consumer) {
 
 	//if s.ch == nil {
 	//	Error("No channel available")
