@@ -14,6 +14,8 @@ type Configurations struct {
 	GithubToken string
 	ConfigPath  string
 	GitUrl      string
+	RepoName    string
+	RepoOwner   string
 }
 
 func InitializeConfigurations(

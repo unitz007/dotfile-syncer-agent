@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -38,14 +37,6 @@ func main() {
 		Error(err.Error())
 		return
 	}
-
-	fmt.Println("")
-
-	//persistence, err := InitializePersistence(config)
-	//if err != nil {
-	//	Error(err.Error())
-	//	return
-	//}
 
 	git := &Git{config}
 	syncer := NewCustomSync(config)
@@ -118,9 +109,7 @@ func main() {
 						sseServer.Publish(SyncStatusLabel, &sse.Event{Data: v})
 						brokerNotifier.SyncStatus(response)
 					} else {
-
 						event := syncStatusStream.Eventlog[len(syncStatusStream.Eventlog)-1]
-
 						var prevResponse SyncStatusResponse
 						_ = json.Unmarshal(event.Data, &prevResponse)
 
