@@ -36,8 +36,9 @@ func Error(v ...string) {
 func ConsoleSyncConsumer(event SyncEvent) {
 	data := event.Data
 	status := "===completed"
-	if data.Progress == 25 {
+	if data.Progress == 0 {
 		Info("Sync triggered===(0%)")
+		time.Sleep(time.Second)
 	} else {
 		fmt.Print("===(" + strconv.Itoa(data.Progress) + "%)")
 	}
@@ -53,4 +54,7 @@ func ConsoleSyncConsumer(event SyncEvent) {
 		time.Sleep(time.Second)
 		fmt.Printf("%s\n", status)
 	}
+
+	time.Sleep(time.Second)
+
 }

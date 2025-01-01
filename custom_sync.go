@@ -1,17 +1,22 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"gopkg.in/yaml.v3"
-	"net/url"
 	"os"
 	"os/exec"
 	"path"
 	"strings"
+	"sync"
+	"time"
 )
 
 type customSync struct {
-	config *Configurations
+	config         *Configurations
+	mutex          *sync.Mutex
+	ch             chan SyncEvent
+	brokerNotifier *BrokerNotifier
 }
 
 type ConfigPathInfo struct {
@@ -20,126 +25,76 @@ type ConfigPathInfo struct {
 	IsDir bool
 }
 
+func NewCustomerSyncer(config *Configurations, brokerNotifier *BrokerNotifier) Syncer {
+	return &customSync{
+		config:         config,
+		ch:             make(chan SyncEvent),
+		mutex:          &sync.Mutex{},
+		brokerNotifier: brokerNotifier,
+	}
+}
+
 func (c customSync) Sync() {
 
-	// step 1: go to tmp directory
-	_ = os.Chdir(os.TempDir())
+	c.mutex.Lock()
 
-	gitUrl := "https://github.com/unitz007/new-dot-file.git"
-	repoName, err := getRepoFromGitLink(gitUrl)
-	if err != nil {
-		Error("Failed to parse git url")
-		return
+	steps := syncSteps(c.config)
+
+	constant := 100 / len(steps)
+	event := SyncEvent{
+		Data: struct {
+			Progress  int    `json:"progress"`
+			IsSuccess bool   `json:"isSuccess"`
+			Step      string `json:"step"`
+			Error     string `json:"error"`
+			Done      bool   `json:"done"`
+		}{Progress: 0, IsSuccess: true, Done: false},
 	}
 
-	cmd := exec.Command("git", "clone", gitUrl)
-	cmd.Stdout = os.Stdout
-	err = cmd.Run()
-	if err != nil {
-		Infoln("Did not clone git repository")
-		_ = os.Chdir(repoName)
-		cmd = exec.Command("git", "pull", "origin", "main")
-		cmd.Stdout = os.Stdout
-		err = cmd.Run()
+	//notify(&Git{c.config}, c.brokerNotifier)
+
+	c.ch <- event
+
+	for i, step := range steps {
+		event.Data.Step = step.Step
+		err := step.Action()
 		if err != nil {
-			Error("Failed to pull origin")
-			return
+			event.Data.IsSuccess = false
+			event.Data.Error = err.Error()
+			c.ch <- event
+			break
 		}
-	} else {
-		Infoln("Cloned git repository from ", gitUrl)
+
+		event.Data.IsSuccess = true
+		event.Data.Progress += constant
+		if i == len(steps)-1 { // on final step
+			event.Data.Done = true
+			progress := event.Data.Progress
+			if progress != 100 {
+				event.Data.Progress += 100 - progress
+			}
+		}
+		c.ch <- event
+		time.Sleep(time.Second)
 	}
 
-	_ = os.Chdir(repoName)
-
-	wd, err := os.Getwd()
-
-	configPaths, err := func() ([]string, error) {
-
-		configFile, err := os.ReadFile(path.Join(wd, "dotfile-config.yaml"))
-		if err != nil {
-			return nil, err
-		}
-
-		yamlToPaths, err := parseYAMLToPaths(string(configFile))
-		if err != nil {
-			return nil, err
-		}
-
-		yamlToPaths = func() []string {
-			var p []string
-			for _, yamlPath := range yamlToPaths {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					break
-				}
-				p = append(p, strings.ReplaceAll(yamlPath, "home", home))
-			}
-			return p
-		}()
-
-		return yamlToPaths, nil
-	}()
-
-	if err != nil {
-		Error(err.Error())
-		return
-	}
-
-	dirs, err := os.ReadDir(wd)
-	for _, info := range dirs {
-		f, err := os.Open(path.Join(wd, info.Name()))
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		configPathsInfo := func() []ConfigPathInfo {
-			var i []ConfigPathInfo
-			for _, c := range configPaths {
-				if strings.Contains(c, info.Name()) {
-					i = append(i, ConfigPathInfo{
-						Src:  f,
-						Dest: strings.TrimSuffix(c, ";"),
-						IsDir: func() bool {
-							return strings.HasSuffix(c, ";")
-						}(),
-					})
-				}
-			}
-			return i
-		}()
-
-		for _, configPathInfo := range configPathsInfo {
-			u, _ := path.Split(configPathInfo.Dest)
-			_, err := os.Stat(u)
-			if err != nil {
-				_ = os.Mkdir(u, os.ModePerm)
-
-			}
-
-			s, _ := path.Split(configPathInfo.Dest)
-
-			_, err = exec.Command("cp", "-r", configPathInfo.Src.Name(), s).CombinedOutput()
-			if err != nil {
-				Error("could not copy", configPathInfo.Src.Name(), "to destination", s)
-			}
-		}
-	}
-
-	//err = os.RemoveAll(wd)
-	//if err != nil {
-	//	Error(err.Error())
-	//} else {
-	//	Infoln("Successfully removed dotfile directory from", strings.Replace(wd, "/"+repoName, "", 1))
-	//}
+	//notify(&Git{c.config}, c.brokerNotifier)
+	close(c.ch)
+	c.ch = make(chan SyncEvent)
+	c.mutex.Unlock()
 }
 
 func (c customSync) Consume(consumers ...Consumer) {
+	consumers = append(consumers, func(event SyncEvent) {
+		c.brokerNotifier.SyncTrigger(event)
+	})
 
-}
-
-func NewCustomSync(config *Configurations) Syncer {
-	return customSync{config: config}
+	for event := range c.ch {
+		for _, consumer := range consumers {
+			consumer(event)
+		}
+		time.Sleep(1 * time.Second)
+	}
 }
 
 // Recursively parses YAML and generates file paths.
@@ -177,27 +132,127 @@ func generatePaths(node map[string]interface{}, currentPath string, paths *[]str
 	}
 }
 
-func getRepoFromGitLink(gitUrl string) (string, error) {
-	parsedURL, err := url.Parse(gitUrl)
-	if err != nil {
-		return "", err
+func syncSteps(config *Configurations) []struct {
+	Step   string
+	Action func() error
+} {
+
+	var (
+		configPathsInfo []ConfigPathInfo
+	)
+
+	return []struct {
+		Step   string
+		Action func() error
+	}{
+		{
+			Step: "Git Repository checkout",
+			Action: func() error {
+				_ = os.Chdir(config.DotfilePath)
+
+				repoName := config.GitRepository
+				cmd := exec.Command("git", "clone", config.GitUrl)
+				err := cmd.Run()
+				if err != nil {
+					//Infoln("git repository already exists")
+					_ = os.Chdir(repoName)
+					cmd = exec.Command("git", "pull", "origin", "main")
+					err = cmd.Run()
+					if err != nil {
+						Error("Failed to pull origin")
+					}
+				} else {
+					Infoln("Cloned git repository from ", config.GitUrl)
+				}
+
+				_ = os.Chdir(repoName)
+
+				return nil
+			},
+		},
+		{
+			Step: "Read dotfile configurations",
+			Action: func() error {
+				wd, err := os.Getwd()
+				if err != nil {
+					return err
+				}
+
+				configPaths, err := func() ([]string, error) {
+					configFile, err := os.ReadFile(path.Join(wd, "dotfile-config.yaml"))
+					if err != nil {
+						return nil, errors.New("skipping sync because dotfile-config.yaml does not exist in this repo")
+					}
+
+					yamlToPaths, err := parseYAMLToPaths(string(configFile))
+					if err != nil {
+						return nil, err
+					}
+
+					yamlToPaths = func() []string {
+						var p []string
+						for _, yamlPath := range yamlToPaths {
+							home, err := os.UserHomeDir()
+							if err != nil {
+								break
+							}
+							p = append(p, strings.ReplaceAll(yamlPath, "home", home))
+						}
+						return p
+					}()
+
+					return yamlToPaths, nil
+				}()
+
+				if err != nil {
+					return err
+				}
+
+				dirs, err := os.ReadDir(wd)
+				for _, info := range dirs {
+					f, err := os.Open(path.Join(wd, info.Name()))
+					if err != nil {
+						return err
+					}
+
+					configPathsInfo = func() []ConfigPathInfo {
+						for _, c := range configPaths {
+							if strings.Contains(c, info.Name()) {
+								configPathsInfo = append(configPathsInfo, ConfigPathInfo{
+									Src:  f,
+									Dest: strings.TrimSuffix(c, ";"),
+									IsDir: func() bool {
+										return strings.HasSuffix(c, ";")
+									}(),
+								})
+							}
+						}
+						return configPathsInfo
+					}()
+				}
+
+				return nil
+			},
+		}, {
+			Step: "Copy dotfiles to configured locations",
+			Action: func() error {
+				for _, configPathInfo := range configPathsInfo {
+					u, _ := path.Split(configPathInfo.Dest)
+					_, err := os.Stat(u)
+					if err != nil {
+						_ = os.MkdirAll(u, os.ModePerm)
+					}
+
+					s, _ := path.Split(configPathInfo.Dest)
+
+					_, err = exec.Command("cp", "-r", configPathInfo.Src.Name(), s).CombinedOutput()
+					if err != nil {
+						return fmt.Errorf("could not copy %s to destination %s", configPathInfo.Src.Name(), s)
+					}
+				}
+
+				return nil
+			},
+		},
 	}
-
-	// Get the path component of the URL
-	p := strings.Trim(parsedURL.Path, "/") // Remove leading/trailing slashes
-
-	// Split the path into segments
-	segments := strings.Split(p, "/")
-	if len(segments) < 2 {
-		Error("invalid GitHub URL: %s", gitUrl)
-		return "", fmt.Errorf("invalid GitHub URL: %s", gitUrl)
-	}
-
-	// The last segment is the repository name
-	repoName := segments[len(segments)-1]
-
-	// Remove ".git" suffix if present
-	repoName = strings.TrimSuffix(repoName, ".git")
-
-	return repoName, nil
 }

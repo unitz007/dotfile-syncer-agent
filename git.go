@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,7 +15,13 @@ type Git struct {
 }
 
 func (g Git) RemoteCommit() (*Commit, error) {
-	request, err := http.NewRequest(http.MethodGet, g.config.GitUrl, nil)
+
+	gitUrl, err := url.Parse(fmt.Sprintf("https://api.github.com/repos/%s/%s/commits", g.config.RepositoryOwner, g.config.GitRepository))
+	if err != nil {
+		return nil, err
+	}
+
+	request, err := http.NewRequest(http.MethodGet, gitUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
