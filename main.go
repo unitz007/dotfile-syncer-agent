@@ -73,8 +73,9 @@ func main() {
 
 					branch := strings.Split(commitRef, "/")[2]
 					if branch == "main" { // only triggers sync on push to main branch
-						syncer.Sync(ConsoleSyncConsumer)
-						//syncer.Consume(ch, ConsoleSyncConsumer)
+						ch := make(chan SyncEvent)
+						go syncer.Sync(ch)
+						syncer.Consume(ch, ConsoleSyncConsumer)
 					}
 				}
 			})

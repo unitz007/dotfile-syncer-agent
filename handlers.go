@@ -42,7 +42,11 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Connection", "keep-alive")
 
 		d := *s.syncer
-		go d.Sync(ConsoleSyncConsumer, func(event SyncEvent) {
+
+		ch := make(chan SyncEvent)
+
+		go d.Sync(ch)
+		d.Consume(ch, ConsoleSyncConsumer, func(event SyncEvent) {
 			data := event.Data
 			v, _ := json.Marshal(data)
 			_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
