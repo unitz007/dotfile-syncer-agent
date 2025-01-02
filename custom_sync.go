@@ -56,7 +56,7 @@ func (c customSync) Sync(ch chan SyncEvent) {
 		}{Progress: 0, IsSuccess: true, Done: false},
 	}
 
-	//notify(&Git{c.config}, c.brokerNotifier)
+	notify(&Git{c.config}, c.brokerNotifier)
 
 	ch <- event
 
@@ -83,8 +83,7 @@ func (c customSync) Sync(ch chan SyncEvent) {
 		ch <- event
 
 	}
-	//notify(&Git{c.config}, c.brokerNotifier)
-	//c.mutex.Unlock()
+	notify(&Git{c.config}, c.brokerNotifier)
 	close(ch)
 	c.mutex.Unlock()
 }
@@ -260,4 +259,21 @@ func syncSteps(config *Configurations) []struct {
 			},
 		},
 	}
+}
+
+func notify(git *Git, brokerNotifier *BrokerNotifier) {
+	localCommit, err := git.LocalCommit()
+	if err != nil {
+		Error(err.Error())
+		return
+	}
+
+	remoteCommit, err := git.RemoteCommit()
+	if err != nil {
+		Error(err.Error())
+		return
+	}
+
+	response := InitGitTransform(localCommit, remoteCommit)
+	brokerNotifier.SyncStatus(response)
 }

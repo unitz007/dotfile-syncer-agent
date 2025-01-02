@@ -16,7 +16,7 @@ type Git struct {
 
 func (g Git) RemoteCommit() (*Commit, error) {
 
-	gitUrl, err := url.Parse(fmt.Sprintf("https://api.github.com/repos/%s/%s/commits", g.config.RepositoryOwner, g.config.GitRepository))
+	gitUrl, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/commits", g.config.GitApiBaseUrl, g.config.RepositoryOwner, g.config.GitRepository))
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (g Git) RemoteCommit() (*Commit, error) {
 }
 
 func (g Git) LocalCommit() (*Commit, error) {
-	err := os.Chdir(g.config.DotfilePath)
+	err := os.Chdir(g.config.DotfilePath + string(os.PathSeparator) + g.config.GitRepository)
 	if err != nil {
 		return nil, err
 	}
