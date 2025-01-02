@@ -44,6 +44,7 @@ func ConsoleSyncConsumer(event SyncEvent) {
 	}
 
 	if !data.IsSuccess {
+		time.Sleep(time.Second)
 		msg := fmt.Sprintf("'%s': [%s]", data.Step, data.Error)
 		status = fmt.Sprintf("===failed (%s)", msg)
 		fmt.Printf("%s\n", status)
@@ -54,7 +55,4 @@ func ConsoleSyncConsumer(event SyncEvent) {
 		time.Sleep(time.Second)
 		fmt.Printf("%s\n", status)
 	}
-
-	time.Sleep(time.Second)
-
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -39,14 +40,15 @@ func main() {
 		return
 	}
 
-	persistence, err := InitializePersistence(config)
+	_, err = InitializePersistence(config)
 	if err != nil {
 		Error(err.Error())
 		return
 	}
 
 	git := &Git{config}
-	syncer := NewStowSyncer(config, persistence, brokerNotifier)
+	mutex := &sync.Mutex{}
+	syncer := NewCustomerSyncer(config, brokerNotifier, mutex)
 	syncHandler := NewSyncHandler(&syncer, git, sseServer)
 	sseClient := sse.NewClient(config.WebHook)
 	brokerNotifier.RegisterStream()
@@ -54,7 +56,7 @@ func main() {
 	Infoln("Listening on webhook url", *webhookUrl)
 	go func() {
 		_, _ = cronJob.AddFunc("@every 5s", func() {
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = sseClient.SubscribeRawWithContext(ctx, func(msg *sse.Event) {
 				if msg != nil {
 					data := string(msg.Data)
@@ -71,8 +73,8 @@ func main() {
 
 					branch := strings.Split(commitRef, "/")[2]
 					if branch == "main" { // only triggers sync on push to main branch
-						go syncer.Sync()
-						syncer.Consume(ConsoleSyncConsumer)
+						syncer.Sync(ConsoleSyncConsumer)
+						//syncer.Consume(ch, ConsoleSyncConsumer)
 					}
 				}
 			})
@@ -81,7 +83,6 @@ func main() {
 				time.Sleep(4 * time.Second)
 				cancel()
 			}()
-
 		})
 
 		cronJob.Start()

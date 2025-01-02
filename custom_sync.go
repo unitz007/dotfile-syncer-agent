@@ -15,7 +15,6 @@ import (
 type customSync struct {
 	config         *Configurations
 	mutex          *sync.Mutex
-	ch             chan SyncEvent
 	brokerNotifier *BrokerNotifier
 }
 
@@ -25,73 +24,91 @@ type ConfigPathInfo struct {
 	IsDir bool
 }
 
-func NewCustomerSyncer(config *Configurations, brokerNotifier *BrokerNotifier) Syncer {
-	return &customSync{
+func NewCustomerSyncer(config *Configurations, brokerNotifier *BrokerNotifier, mutex *sync.Mutex) Syncer {
+	return customSync{
 		config:         config,
-		ch:             make(chan SyncEvent),
-		mutex:          &sync.Mutex{},
+		mutex:          mutex,
 		brokerNotifier: brokerNotifier,
 	}
 }
 
-func (c customSync) Sync() {
+func (c customSync) Sync(consumers ...Consumer) {
 
 	c.mutex.Lock()
 
-	steps := syncSteps(c.config)
+	ch := make(chan SyncEvent)
 
-	constant := 100 / len(steps)
-	event := SyncEvent{
-		Data: struct {
-			Progress  int    `json:"progress"`
-			IsSuccess bool   `json:"isSuccess"`
-			Step      string `json:"step"`
-			Error     string `json:"error"`
-			Done      bool   `json:"done"`
-		}{Progress: 0, IsSuccess: true, Done: false},
-	}
+	go func() {
+		//c.mutex.Lock()
+		steps := syncSteps(c.config)
 
-	//notify(&Git{c.config}, c.brokerNotifier)
-
-	c.ch <- event
-
-	for i, step := range steps {
-		event.Data.Step = step.Step
-		err := step.Action()
-		if err != nil {
-			event.Data.IsSuccess = false
-			event.Data.Error = err.Error()
-			c.ch <- event
-			break
+		constant := 100 / len(steps)
+		event := SyncEvent{
+			Data: struct {
+				Progress  int    `json:"progress"`
+				IsSuccess bool   `json:"isSuccess"`
+				Step      string `json:"step"`
+				Error     string `json:"error"`
+				Done      bool   `json:"done"`
+			}{Progress: 0, IsSuccess: true, Done: false},
 		}
 
-		event.Data.IsSuccess = true
-		event.Data.Progress += constant
-		if i == len(steps)-1 { // on final step
-			event.Data.Done = true
-			progress := event.Data.Progress
-			if progress != 100 {
-				event.Data.Progress += 100 - progress
+		//notify(&Git{c.config}, c.brokerNotifier)
+
+		ch <- event
+
+		for i, step := range steps {
+			event.Data.Step = step.Step
+			err := step.Action()
+			if err != nil {
+
+				event.Data.IsSuccess = false
+				event.Data.Error = err.Error()
+				ch <- event
+				return
 			}
+
+			event.Data.IsSuccess = true
+			event.Data.Progress += constant
+			if i == len(steps)-1 { // on final step
+				event.Data.Done = true
+				progress := event.Data.Progress
+				if progress != 100 {
+					event.Data.Progress += 100 - progress
+				}
+			}
+			ch <- event
+
 		}
-		c.ch <- event
-		time.Sleep(time.Second)
-	}
+
+	}()
+
+	go func() {
+		consumers = append(consumers, func(event SyncEvent) {
+			c.brokerNotifier.SyncTrigger(event)
+		})
+
+		for event := range ch {
+			for _, consumer := range consumers {
+				go consumer(event)
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}()
 
 	//notify(&Git{c.config}, c.brokerNotifier)
-	close(c.ch)
-	c.ch = make(chan SyncEvent)
 	c.mutex.Unlock()
+	//close(ch)
 }
 
-func (c customSync) Consume(consumers ...Consumer) {
+func (c customSync) Consume(ch chan SyncEvent, consumers ...Consumer) {
 	consumers = append(consumers, func(event SyncEvent) {
 		c.brokerNotifier.SyncTrigger(event)
 	})
 
-	for event := range c.ch {
+	for event := range ch {
 		for _, consumer := range consumers {
-			consumer(event)
+			go consumer(event)
 		}
 		time.Sleep(1 * time.Second)
 	}
