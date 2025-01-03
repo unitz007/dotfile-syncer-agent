@@ -27,7 +27,7 @@ func main() {
 		dotFilePath   = rootCmd.Flags().StringP("dotfile-path", "d", "", "path to dotfile directory")
 		configDir     = rootCmd.Flags().StringP("config-dir", "c", "", "path to config directory")
 		gitUrl        = rootCmd.Flags().StringP("git-url", "g", "", "github api url")
-		gitApiBaseUrl = rootCmd.Flags().StringP("git-api-base-url", "b", "", "github api url")
+		gitApiBaseUrl = rootCmd.Flags().StringP("git-api-base-url", "b", "https://api.github.com", "github api url")
 	)
 
 	if err := rootCmd.Execute(); err != nil {
