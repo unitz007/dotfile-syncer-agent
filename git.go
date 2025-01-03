@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,7 +15,17 @@ type Git struct {
 }
 
 func (g Git) RemoteCommit() (*Commit, error) {
-	request, err := http.NewRequest(http.MethodGet, g.config.GitUrl, nil)
+
+	if g.config.GitApiBaseUrl != "" {
+
+	}
+
+	gitUrl, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/commits", g.config.GitApiBaseUrl, g.config.RepositoryOwner, g.config.GitRepository))
+	if err != nil {
+		return nil, err
+	}
+
+	request, err := http.NewRequest(http.MethodGet, gitUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +63,7 @@ func (g Git) RemoteCommit() (*Commit, error) {
 }
 
 func (g Git) LocalCommit() (*Commit, error) {
-	err := os.Chdir(g.config.DotfilePath)
+	err := os.Chdir(g.config.DotfilePath + string(os.PathSeparator) + g.config.GitRepository)
 	if err != nil {
 		return nil, err
 	}
