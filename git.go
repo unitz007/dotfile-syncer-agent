@@ -16,6 +16,10 @@ type Git struct {
 
 func (g Git) RemoteCommit() (*Commit, error) {
 
+	if g.config.GitApiBaseUrl != "" {
+
+	}
+
 	gitUrl, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/commits", g.config.GitApiBaseUrl, g.config.RepositoryOwner, g.config.GitRepository))
 	if err != nil {
 		return nil, err

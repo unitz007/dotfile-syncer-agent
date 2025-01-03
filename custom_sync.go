@@ -39,10 +39,6 @@ func (c customSync) Sync(ch chan SyncEvent) {
 	c.mutex.Lock()
 	time.Sleep(time.Second)
 
-	//ch := c.ch
-
-	//go func() {
-	//c.mutex.Lock()
 	steps := syncSteps(c.config)
 
 	constant := 100 / len(steps)
@@ -64,11 +60,10 @@ func (c customSync) Sync(ch chan SyncEvent) {
 		event.Data.Step = step.Step
 		err := step.Action()
 		if err != nil {
-
 			event.Data.IsSuccess = false
 			event.Data.Error = err.Error()
 			ch <- event
-			return
+			break
 		}
 
 		event.Data.IsSuccess = true

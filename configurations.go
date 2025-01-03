@@ -79,6 +79,10 @@ func InitializeConfigurations(
 
 	repoOwner, err := getRepoValue(gitUrl, "repoOwner")
 
+	if githubApiBaseUrl == "" {
+		return nil, errors.New("no github api base url provided")
+	}
+
 	if err != nil {
 		return nil, err
 	}
