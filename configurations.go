@@ -92,7 +92,6 @@ func InitializeConfigurations(
 	Infoln("Dotfile Path ->", dotfilePath)
 	Infoln("Git Repository ->", repoName)
 	Infoln("Repository Owner ->", repoOwner)
-	Infoln("Git Api Base Url ->", githubApiBaseUrl)
 	Infoln("Home Path ->", func() string {
 		h, _ := os.UserHomeDir()
 		return h
@@ -111,7 +110,6 @@ func InitializeConfigurations(
 		GitUrl:          gitUrl,
 		GitRepository:   repoName,
 		RepositoryOwner: repoOwner,
-		GitApiBaseUrl:   githubApiBaseUrl,
 	}
 
 	return config, nil
