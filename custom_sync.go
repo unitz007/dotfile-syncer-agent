@@ -45,7 +45,7 @@ func (c customSync) Sync(ch chan SyncEvent) {
 	c.mutex.Lock()
 	time.Sleep(time.Second)
 
-	steps := syncSteps(c.config, c.git)
+	steps := syncSteps(c.git)
 
 	constant := 100 / len(steps)
 	event := SyncEvent{
@@ -58,7 +58,7 @@ func (c customSync) Sync(ch chan SyncEvent) {
 		}{Progress: 0, IsSuccess: true, Done: false},
 	}
 
-	//notify(&Git{c.config}, c.brokerNotifier)
+	notify(&Git{c.config}, c.brokerNotifier)
 
 	ch <- event
 
@@ -84,8 +84,7 @@ func (c customSync) Sync(ch chan SyncEvent) {
 		ch <- event
 
 	}
-	//notify(&Git{c.config}, c.brokerNotifier)
-	//c.mutex.Unlock()
+	notify(&Git{c.config}, c.brokerNotifier)
 	close(ch)
 	c.mutex.Unlock()
 }
@@ -139,7 +138,7 @@ func generatePaths(node map[string]interface{}, currentPath string, paths *[]str
 	}
 }
 
-func syncSteps(config *Configurations, git *Git) []struct {
+func syncSteps(git *Git) []struct {
 	Step   string
 	Action func() error
 } {
@@ -155,27 +154,6 @@ func syncSteps(config *Configurations, git *Git) []struct {
 		{
 			Step: "Git Repository checkout",
 			Action: func() error {
-				//_ = os.Chdir(config.DotfilePath)
-				//
-				//repoName := config.GitRepository
-				//cmd := exec.Command("git", "clone", config.GitUrl)
-				//err := cmd.Run()
-				//if err != nil {
-				//	//Infoln("git repository already exists")
-				//	_ = os.Chdir(repoName)
-				//	cmd = exec.Command("git", "pull", "origin", "main")
-				//	err = cmd.Run()
-				//	if err != nil {
-				//		Error("Failed to pull origin")
-				//	}
-				//} else {
-				//	Infoln("Cloned git repository from ", config.GitUrl)
-				//}
-				//
-				//_ = os.Chdir(repoName)
-				//
-				//return nil
-
 				return git.CloneOrPullRepository()
 			},
 		},
@@ -264,4 +242,21 @@ func syncSteps(config *Configurations, git *Git) []struct {
 			},
 		},
 	}
+}
+
+func notify(git *Git, brokerNotifier *BrokerNotifier) {
+	localCommit, err := git.LocalCommit()
+	if err != nil {
+		Error(err.Error())
+		return
+	}
+
+	remoteCommit, err := git.RemoteCommit()
+	if err != nil {
+		Error(err.Error())
+		return
+	}
+
+	response := InitGitTransform(localCommit, remoteCommit)
+	brokerNotifier.SyncStatus(response)
 }

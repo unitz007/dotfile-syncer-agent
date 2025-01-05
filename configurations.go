@@ -79,10 +79,6 @@ func InitializeConfigurations(
 
 	repoOwner, err := getRepoValue(gitUrl, "repoOwner")
 
-	if githubApiBaseUrl == "" {
-		githubApiBaseUrl = "https://api.github.com" // defaults to github api
-	}
-
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +107,7 @@ func InitializeConfigurations(
 		GitUrl:          gitUrl,
 		GitRepository:   repoName,
 		RepositoryOwner: repoOwner,
+		GitApiBaseUrl:   githubApiBaseUrl,
 	}
 
 	return config, nil
