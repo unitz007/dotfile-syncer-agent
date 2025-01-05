@@ -80,7 +80,7 @@ func InitializeConfigurations(
 	repoOwner, err := getRepoValue(gitUrl, "repoOwner")
 
 	if githubApiBaseUrl == "" {
-		return nil, errors.New("no github api base url provided")
+		githubApiBaseUrl = "https://api.github.com" // defaults to github api
 	}
 
 	if err != nil {
@@ -96,6 +96,7 @@ func InitializeConfigurations(
 		h, _ := os.UserHomeDir()
 		return h
 	}())
+	Infoln("API Base Url ->", githubApiBaseUrl)
 	Infoln("WebHook ->", webHook)
 	Infoln("Git Url ->", gitUrl)
 	Infoln("Port ->", port)

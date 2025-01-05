@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 )
 
@@ -64,12 +65,12 @@ func (g Git) LocalCommit() (*Commit, error) {
 		return nil, err
 	}
 
-	path, err := exec.LookPath("git")
+	gitPath, err := exec.LookPath("git")
 	if err != nil {
 		return nil, err
 	}
 
-	headCommit, err := exec.Command(path, "log", "HEAD", "-1").CombinedOutput()
+	headCommit, err := exec.Command(gitPath, "log", "HEAD", "-1").CombinedOutput()
 	if err != nil {
 		return nil, err
 	}
@@ -89,12 +90,48 @@ func (g Git) LocalCommit() (*Commit, error) {
 	return commit, nil
 }
 
-func (g Git) IsSync() bool {
-	localCommit, err := g.LocalCommit()
-	remoteCommit, err := g.RemoteCommit()
-	if err != nil {
+func (g Git) IsSync(localCommit, remoteCommit *Commit) bool {
+
+	if localCommit == nil || remoteCommit == nil {
 		return false
 	}
 
 	return localCommit.Id == remoteCommit.Id
+}
+
+func (g Git) CloneOrPullRepository() error {
+
+	git, err := exec.LookPath("git")
+	if err != nil {
+		return err
+	}
+
+	return func() error {
+
+		repoPath := path.Join(g.config.DotfilePath, g.config.GitRepository)
+		_, err = os.Stat(repoPath) // checks if repo already exists
+		if err != nil {
+			err = os.Chdir(g.config.DotfilePath)
+			if err != nil {
+				return err
+			}
+
+			err = exec.Command(git, "clone", g.config.GitUrl).Run()
+			if err != nil {
+				return err
+			}
+
+			return os.Chdir(g.config.GitRepository)
+		} else {
+			err = os.Chdir(repoPath)
+			if err != nil {
+				return err
+			}
+
+			return exec.Command(git, "pull", "origin", "main").Run()
+
+		}
+
+		return nil
+	}()
 }

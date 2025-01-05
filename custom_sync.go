@@ -17,6 +17,7 @@ type customSync struct {
 	mutex          *sync.Mutex
 	brokerNotifier *BrokerNotifier
 	ch             chan SyncEvent
+	git            *Git
 }
 
 type ConfigPathInfo struct {
@@ -25,12 +26,17 @@ type ConfigPathInfo struct {
 	IsDir bool
 }
 
-func NewCustomerSyncer(config *Configurations, brokerNotifier *BrokerNotifier, mutex *sync.Mutex) Syncer {
+func NewCustomerSyncer(
+	config *Configurations,
+	brokerNotifier *BrokerNotifier,
+	mutex *sync.Mutex,
+	git *Git) Syncer {
+
 	return customSync{
 		config:         config,
 		mutex:          mutex,
 		brokerNotifier: brokerNotifier,
-		//ch:             make(chan SyncEvent),
+		git:            git,
 	}
 }
 
@@ -39,7 +45,7 @@ func (c customSync) Sync(ch chan SyncEvent) {
 	c.mutex.Lock()
 	time.Sleep(time.Second)
 
-	steps := syncSteps(c.config)
+	steps := syncSteps(c.config, c.git)
 
 	constant := 100 / len(steps)
 	event := SyncEvent{
@@ -106,6 +112,7 @@ func parseYAMLToPaths(data string) ([]string, error) {
 
 	var paths []string
 	generatePaths(rawData, "", &paths)
+
 	return paths, nil
 }
 
@@ -132,7 +139,7 @@ func generatePaths(node map[string]interface{}, currentPath string, paths *[]str
 	}
 }
 
-func syncSteps(config *Configurations) []struct {
+func syncSteps(config *Configurations, git *Git) []struct {
 	Step   string
 	Action func() error
 } {
@@ -148,26 +155,28 @@ func syncSteps(config *Configurations) []struct {
 		{
 			Step: "Git Repository checkout",
 			Action: func() error {
-				_ = os.Chdir(config.DotfilePath)
+				//_ = os.Chdir(config.DotfilePath)
+				//
+				//repoName := config.GitRepository
+				//cmd := exec.Command("git", "clone", config.GitUrl)
+				//err := cmd.Run()
+				//if err != nil {
+				//	//Infoln("git repository already exists")
+				//	_ = os.Chdir(repoName)
+				//	cmd = exec.Command("git", "pull", "origin", "main")
+				//	err = cmd.Run()
+				//	if err != nil {
+				//		Error("Failed to pull origin")
+				//	}
+				//} else {
+				//	Infoln("Cloned git repository from ", config.GitUrl)
+				//}
+				//
+				//_ = os.Chdir(repoName)
+				//
+				//return nil
 
-				repoName := config.GitRepository
-				cmd := exec.Command("git", "clone", config.GitUrl)
-				err := cmd.Run()
-				if err != nil {
-					//Infoln("git repository already exists")
-					_ = os.Chdir(repoName)
-					cmd = exec.Command("git", "pull", "origin", "main")
-					err = cmd.Run()
-					if err != nil {
-						Error("Failed to pull origin")
-					}
-				} else {
-					Infoln("Cloned git repository from ", config.GitUrl)
-				}
-
-				_ = os.Chdir(repoName)
-
-				return nil
+				return git.CloneOrPullRepository()
 			},
 		},
 		{
