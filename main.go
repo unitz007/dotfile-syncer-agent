@@ -46,7 +46,7 @@ func main() {
 	brokerNotifier.RegisterStream()
 	var lastEventChange time.Time
 
-	sseSub := func(sseClient *sse.Client, syncer Syncer) error {
+	var sseSub = func(sseClient *sse.Client, syncer Syncer) error {
 		return sseClient.SubscribeRaw(func(msg *sse.Event) {
 			if msg != nil {
 				lastEventChange = time.Now()
@@ -64,9 +64,7 @@ func main() {
 
 				branch := strings.Split(commitRef, "/")[2]
 				if branch == "main" { // only triggers sync on push to main branch
-					ch := make(chan SyncEvent)
-					go syncer.Sync(ch)
-					syncer.Consume(ch, ConsoleSyncConsumer)
+					syncer.Sync(ConsoleSyncConsumer)
 				}
 			}
 		})
@@ -75,7 +73,7 @@ func main() {
 	Infoln("Listening on webhook url", *webhookUrl)
 	go func() {
 		var delta int
-		_, _ = cronJob.AddFunc("@every 30s", func() {
+		_, _ = cronJob.AddFunc("@every 5s", func() {
 			if delta == lastEventChange.Second() {
 				_ = sseSub(sseClient, syncer)
 			} else {

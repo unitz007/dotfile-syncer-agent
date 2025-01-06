@@ -40,67 +40,82 @@ func NewCustomerSyncer(
 	}
 }
 
-func (c customSync) Sync(ch chan SyncEvent) {
-
+func (c customSync) Sync(consumers ...Consumer) {
 	c.mutex.Lock()
-	time.Sleep(time.Second)
+	ch := make(chan SyncEvent)
 
-	steps := syncSteps(c.git)
+	go func() {
+		steps := syncSteps(c.git)
 
-	constant := 100 / len(steps)
-	event := SyncEvent{
-		Data: struct {
-			Progress  int    `json:"progress"`
-			IsSuccess bool   `json:"isSuccess"`
-			Step      string `json:"step"`
-			Error     string `json:"error"`
-			Done      bool   `json:"done"`
-		}{Progress: 0, IsSuccess: true, Done: false},
-	}
-
-	notify(&Git{c.config}, c.brokerNotifier)
-
-	ch <- event
-
-	for i, step := range steps {
-		event.Data.Step = step.Step
-		err := step.Action()
-		if err != nil {
-			event.Data.IsSuccess = false
-			event.Data.Error = err.Error()
-			ch <- event
-			break
+		constant := 100 / len(steps)
+		event := SyncEvent{
+			Data: struct {
+				Progress  int    `json:"progress"`
+				IsSuccess bool   `json:"isSuccess"`
+				Step      string `json:"step"`
+				Error     string `json:"error"`
+				Done      bool   `json:"done"`
+			}{Progress: 0, IsSuccess: true, Done: false},
 		}
 
-		event.Data.IsSuccess = true
-		event.Data.Progress += constant
-		if i == len(steps)-1 { // on final step
-			event.Data.Done = true
-			progress := event.Data.Progress
-			if progress != 100 {
-				event.Data.Progress += 100 - progress
-			}
-		}
+		notify(&Git{c.config}, c.brokerNotifier)
+
 		ch <- event
 
-	}
-	notify(&Git{c.config}, c.brokerNotifier)
-	close(ch)
-	c.mutex.Unlock()
-}
+		for i, step := range steps {
+			event.Data.Step = step.Step
+			err := step.Action()
+			if err != nil {
+				event.Data.IsSuccess = false
+				event.Data.Error = err.Error()
+				ch <- event
+				break
+			}
 
-func (c customSync) Consume(ch chan SyncEvent, consumers ...Consumer) {
+			event.Data.IsSuccess = true
+			event.Data.Progress += constant
+			if i == len(steps)-1 { // on final step
+				event.Data.Done = true
+				progress := event.Data.Progress
+				if progress != 100 {
+					event.Data.Progress += 100 - progress
+				}
+			}
+			ch <- event
+
+		}
+
+		close(ch)
+	}()
+
+	notify(&Git{c.config}, c.brokerNotifier)
+
 	consumers = append(consumers, func(event SyncEvent) {
 		c.brokerNotifier.SyncTrigger(event)
 	})
 
 	for event := range ch {
 		for _, consumer := range consumers {
-			go consumer(event)
+			consumer(event)
 		}
 		time.Sleep(1 * time.Second)
 	}
+
+	c.mutex.Unlock()
 }
+
+//func (c customSync) Consume(ch chan SyncEvent, consumers ...Consumer) {
+//	consumers = append(consumers, func(event SyncEvent) {
+//		c.brokerNotifier.SyncTrigger(event)
+//	})
+//
+//	for event := range ch {
+//		for _, consumer := range consumers {
+//			go consumer(event)
+//		}
+//		time.Sleep(1 * time.Second)
+//	}
+//}
 
 // Recursively parses YAML and generates file paths.
 func parseYAMLToPaths(data string) ([]string, error) {
@@ -158,7 +173,7 @@ func syncSteps(git *Git) []struct {
 			},
 		},
 		{
-			Step: "Read dotfile configurations",
+			Step: "Parse dotfile configurations",
 			Action: func() error {
 				wd, err := os.Getwd()
 				if err != nil {

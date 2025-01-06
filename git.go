@@ -130,7 +130,5 @@ func (g Git) CloneOrPullRepository() error {
 			return exec.Command(git, "pull", "origin", "main").Run()
 
 		}
-
-		return nil
 	}()
 }

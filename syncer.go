@@ -3,9 +3,7 @@ package main
 type Consumer func(syncEvent SyncEvent)
 
 type Syncer interface {
-	Sync(ch chan SyncEvent)
-	Consume(ch chan SyncEvent, consumers ...Consumer)
-	//Rollback(commitId string, ch chan SyncEvent)
+	Sync(consumers ...Consumer)
 }
 
 type SyncEvent struct {

@@ -21,7 +21,7 @@ func Info(v ...string) {
 		s = s + " " + c
 	}
 
-	fmt.Print(time.Now().Format(time.RFC3339), "INFO:", s)
+	fmt.Print(time.Now().Format(time.RFC3339), " INFO:", s)
 }
 
 func Error(v ...string) {

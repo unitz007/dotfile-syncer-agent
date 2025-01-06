@@ -43,15 +43,20 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 
 		d := *s.syncer
 
-		ch := make(chan SyncEvent)
+		//ch := make(chan SyncEvent)
 
-		go d.Sync(ch)
-		d.Consume(ch, ConsoleSyncConsumer, func(event SyncEvent) {
+		d.Sync(ConsoleSyncConsumer, func(event SyncEvent) {
 			data := event.Data
 			v, _ := json.Marshal(data)
 			_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
 			writer.(http.Flusher).Flush() // Send the event immediately
 		})
+		//d.Consume(ch, ConsoleSyncConsumer, func(event SyncEvent) {
+		//	data := event.Data
+		//	v, _ := json.Marshal(data)
+		//	_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))
+		//	writer.(http.Flusher).Flush() // Send the event immediately
+		//})
 
 	case http.MethodGet: // GET
 		stream := request.URL.Query().Get("stream")
