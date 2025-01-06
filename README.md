@@ -40,25 +40,20 @@ are always up-to-date and readily available across your machines.
 
 * **dotfile-config.yaml:**  Create a `dotfile-config.yaml` file in the root of your Git repository. This file will
   define how your dotfiles should be synchronized.
-* You can use the `parseYAMLToPaths` function to convert your YAML configuration to a list of file paths.
 
 * **Environment Variables:**  Set the following environment variables:
-* `GITHUB_TOKEN`:  Your GitHub personal access token (if using GitHub as your Git provider).
-* `DOTFILE_MACHINE_ID`:  A unique identifier for your machine.
-* `DOTFILE_BROKER_URL`:  The URL of your broker service (if using broker notifications).
-
-### Commands
-
-* `dotfile-agent sync`:  Manually trigger dotfile synchronization.
+    * `GITHUB_TOKEN`:  Your GitHub personal access token (if using GitHub as your Git provider).
+    * `DOTFILE_MACHINE_ID`:  A unique identifier for your machine.
+    * `DOTFILE_BROKER_URL`:  The URL of your broker service (if using broker notifications).
 
 ### Options
 
 * `-p, --port`:  Specify the HTTP port to run on (default: 3000).
 * `-w, --webhook`:  Set the Git webhook URL.
-* `-d, --dotfile-path`:  Set the path to your dotfile directory. 
-* `-c, --config-dir`:  Set the path to your configuration directory. 
-* `-g, --git-url`:  Set the Git URL of your dotfiles repository. 
-* `-b, --git-api-base-url`:  Set the base URL of the Git API (default: `https://api.github.com`). 
+* `-d, --dotfile-path`:  Set the path to your dotfile directory.
+* `-c, --config-dir`:  Set the path to your configuration directory.
+* `-g, --git-url`:  Set the Git URL of your dotfiles repository.
+* `-b, --git-api-base-url`:  Set the base URL of the Git API (default: `https://api.github.com`).
 
 ## Examples
 
@@ -68,16 +63,10 @@ are always up-to-date and readily available across your machines.
 home:
   - .bashrc       # $HOME/.bashrc
   - .vimrc        # $HOME/.vimrc
-  - .config:      # $HOME/.config
+  - .config: # $HOME/.config
       nvim;       # designates a directory - $HOME/.config/nvim
 ```
 
-Running the Agent
-dotfile-agent sync
-Contributing
-Contributions to the Dotfile Agent are welcome! Please feel free to open issues, submit pull requests, or share your
-ideas for improvement.
-License
 This project is licensed under the MIT License.
 
 Please note that the above README.md file is generated based on the provided source code excerpts. It assumes that the
