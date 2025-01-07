@@ -1,20 +1,17 @@
 package main
 
 import (
-	"encoding/json"
 	"github.com/r3labs/sse/v2"
-	"github.com/robfig/cron/v3"
+	//"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
-	"time"
 )
 
 func main() {
 	var (
-		cronJob        = cron.New()
+		//cronJob        = cron.New()
 		rootCmd        = cobra.Command{}
 		mux            = http.NewServeMux()
 		sseServer      = sse.New()
@@ -42,48 +39,86 @@ func main() {
 	mutex := &sync.Mutex{}
 	syncer := NewCustomerSyncer(config, brokerNotifier, mutex, git)
 	syncHandler := NewSyncHandler(&syncer, git, sseServer)
-	sseClient := sse.NewClient(config.WebHook)
+	//sseClient := sse.NewClient(config.WebHook)
 	brokerNotifier.RegisterStream()
-	var lastEventChange time.Time
+	//var lastEventChange time.Time
 
-	var sseSub = func(sseClient *sse.Client, syncer Syncer) error {
-		return sseClient.SubscribeRaw(func(msg *sse.Event) {
-			if msg != nil {
-				lastEventChange = time.Now()
-				data := string(msg.Data)
-				var commit *GitWebHookCommitResponse
-				err := json.Unmarshal([]byte(data), &commit)
-				if err != nil {
-					return
-				}
+	var sseSub = func(syncer Syncer) error {
+		res, err := http.Get(config.WebHook)
+		if err != nil {
+			return err
+		}
 
-				commitRef := commit.Ref
-				if commitRef == "" {
-					return
-				}
+		err = res.Write(SseClient{syncer})
 
-				branch := strings.Split(commitRef, "/")[2]
-				if branch == "main" { // only triggers sync on push to main branch
-					syncer.Sync(ConsoleSyncConsumer)
-				}
-			}
-		})
+		if err != nil {
+			return err
+		}
+		//_, after, found := bytes.Cut(p, []byte("data:"))
+		//if found {
+		//data := w.val
+		//fmt.Println(data)
+		//var commit *GitWebHookCommitResponse
+		//err = json.Unmarshal([]byte(data), &commit)
+		//if err != nil {
+		//	fmt.Println(err)
+		//	return err
+		//}
+		//
+		//commitRef := commit.Ref
+		//if commitRef == "" {
+		//	return errors.New("empty commit ref")
+		//}
+		//
+		//branch := strings.Split(commitRef, "/")[2]
+		//if branch == "main" { // only triggers sync on push to main branch
+		//	syncer.Sync(ConsoleSyncConsumer)
+		//}
+		//}
+
+		//return sseClient.SubscribeRaw(func(msg *sse.Event) {
+		//	if msg != nil {
+		//		lastEventChange = time.Now()
+		//		data := string(msg.Data)
+		//		var commit *GitWebHookCommitResponse
+		//		err := json.Unmarshal([]byte(data), &commit)
+		//		if err != nil {
+		//			return
+		//		}
+		//
+		//		commitRef := commit.Ref
+		//		if commitRef == "" {
+		//			return
+		//		}
+		//
+		//		branch := strings.Split(commitRef, "/")[2]
+		//		if branch == "main" { // only triggers sync on push to main branch
+		//			syncer.Sync(ConsoleSyncConsumer)
+		//		}
+		//	}
+		//})
+		return nil
 	}
 
 	Infoln("Listening on webhook url", *webhookUrl)
 	go func() {
-		var delta int
-		_, _ = cronJob.AddFunc("@every 5s", func() {
-			if delta == lastEventChange.Second() {
-				_ = sseSub(sseClient, syncer)
-			} else {
-				delta = lastEventChange.Second()
-			}
-		})
+		//var delta int
+		//_, _ = cronJob.AddFunc("@every 5s", func() {
+		//	if delta == lastEventChange.Second() {
+		//		_ = sseSub(syncer)
+		//
+		//	} else {
+		//		delta = lastEventChange.Second()
+		//	}
+		//})
+		//
+		//cronJob.Start()
 
-		cronJob.Start()
-
-		_ = sseSub(sseClient, syncer)
+		err = sseSub(syncer)
+		if err != nil {
+			Error(err.Error())
+			return
+		}
 	}()
 
 	// register handlers
