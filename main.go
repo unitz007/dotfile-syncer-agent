@@ -1,8 +1,8 @@
 package main
 
 import (
+	"context"
 	"github.com/r3labs/sse/v2"
-	"github.com/robfig/cron/v3"
 	"time"
 
 	//"github.com/robfig/cron/v3"
@@ -14,7 +14,7 @@ import (
 
 func main() {
 	var (
-		cronJob        = cron.New()
+		//cronJob        = cron.New()
 		rootCmd        = cobra.Command{}
 		mux            = http.NewServeMux()
 		sseServer      = sse.New()
@@ -42,58 +42,35 @@ func main() {
 	mutex := &sync.Mutex{}
 	syncer := NewCustomerSyncer(config, brokerNotifier, mutex, git)
 	syncHandler := NewSyncHandler(&syncer, git, sseServer)
-	//sseClient := sse.NewClient(config.WebHook)
 	brokerNotifier.RegisterStream()
-	var lastEventChange time.Time
-	var httpClient http.Client
+	timeOut := 5 * time.Second
 
-	timeOut := 2 * time.Second
-
-	var sseSub = func(syncer Syncer) error {
-		httpClient = http.Client{
-			Timeout: timeOut,
-			Transport: &http.Transport{
-				IdleConnTimeout: timeOut,
-			},
+	func(httpClient *http.Client, syncer Syncer) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Minute))
+		defer time.AfterFunc(timeOut, cancel)
+		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
+		ticker := time.NewTicker(timeOut)
+		done := make(chan bool)
+		for {
+			select {
+			case <-done:
+				ticker.Stop()
+			case <-ticker.C:
+				now := time.Now()
+				deadLineTime, _ := request.Context().Deadline()
+				if now.After(deadLineTime) {
+					now = time.Now()
+					ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(timeOut))
+					request = request.WithContext(ctx)
+				} else {
+					res, _ := httpClient.Do(request)
+					err = res.Write(SseClient{syncer})
+				}
+			}
 		}
-
-		res, err := httpClient.Get(config.WebHook)
-		defer func() {
-
-		}()
-		if err != nil {
-			return err
-		}
-
-		err = res.Write(SseClient{syncer})
-
-		if err != nil {
-			return err
-		}
-
-		return nil
-	}
+	}(&http.Client{}, syncer)
 
 	Infoln("Listening on webhook url", *webhookUrl)
-	go func() {
-		var delta int
-		_, _ = cronJob.AddFunc("@every 5s", func() {
-			if delta == lastEventChange.Second() {
-				_ = sseSub(syncer)
-
-			} else {
-				delta = lastEventChange.Second()
-			}
-		})
-
-		cronJob.Start()
-
-		err = sseSub(syncer)
-		if err != nil {
-			Error(err.Error())
-			return
-		}
-	}()
 
 	// register handlers
 	mux.HandleFunc("/sync", syncHandler.Sync)
