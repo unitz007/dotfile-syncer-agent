@@ -46,8 +46,7 @@ func main() {
 	timeOut := 5 * time.Second
 
 	func(httpClient *http.Client, syncer Syncer) {
-		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Minute))
-		defer time.AfterFunc(timeOut, cancel)
+		ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(1*time.Minute))
 		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
 		ticker := time.NewTicker(timeOut)
 		done := make(chan bool)
@@ -60,7 +59,7 @@ func main() {
 				deadLineTime, _ := request.Context().Deadline()
 				if now.After(deadLineTime) {
 					now = time.Now()
-					ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(timeOut))
+					ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(1*time.Minute))
 					request = request.WithContext(ctx)
 				} else {
 					res, _ := httpClient.Do(request)
