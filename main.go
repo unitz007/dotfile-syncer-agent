@@ -43,31 +43,34 @@ func main() {
 	syncer := NewCustomerSyncer(config, brokerNotifier, mutex, git)
 	syncHandler := NewSyncHandler(&syncer, git, sseServer)
 	brokerNotifier.RegisterStream()
-	timeOut := 5 * time.Second
+	contextDeadline := 4 * time.Second
 
-	func(httpClient *http.Client, syncer Syncer) {
-		ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(1*time.Minute))
-		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
-		ticker := time.NewTicker(timeOut)
-		done := make(chan bool)
-		for {
-			select {
-			case <-done:
-				ticker.Stop()
-			case <-ticker.C:
-				now := time.Now()
-				deadLineTime, _ := request.Context().Deadline()
-				if now.After(deadLineTime) {
-					now = time.Now()
-					ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(1*time.Minute))
-					request = request.WithContext(ctx)
-				} else {
-					res, _ := httpClient.Do(request)
-					err = res.Write(SseClient{syncer})
+	go func() {
+
+		func(httpClient *http.Client, syncer Syncer) {
+			ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(contextDeadline))
+			request, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
+			ticker := time.NewTicker(5 * time.Second)
+			done := make(chan bool)
+			for {
+				select {
+				case <-done:
+					ticker.Stop()
+				case <-ticker.C:
+					now := time.Now()
+					deadLineTime, _ := request.Context().Deadline()
+					if now.After(deadLineTime) {
+						now = time.Now()
+						ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(contextDeadline))
+						request = request.WithContext(ctx)
+					} else {
+						res, _ := httpClient.Do(request)
+						err = res.Write(SseClient{syncer})
+					}
 				}
 			}
-		}
-	}(&http.Client{}, syncer)
+		}(&http.Client{}, syncer)
+	}()
 
 	Infoln("Listening on webhook url", *webhookUrl)
 

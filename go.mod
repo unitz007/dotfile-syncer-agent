@@ -5,7 +5,6 @@ go 1.22.3
 require (
 	github.com/haibeey/doclite v0.0.0-20240807221932-57a9a65bb81f
 	github.com/r3labs/sse/v2 v2.10.0
-	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.8.1
 	gopkg.in/yaml.v3 v3.0.1
 )
