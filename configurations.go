@@ -68,10 +68,6 @@ func InitializeConfigurations(
 		return configPath, nil
 	}()
 
-	if gitUrl == "" {
-		return nil, errors.New("no git url provided")
-	}
-
 	repoName, err := getRepoValue(gitUrl, "repository")
 	if err != nil {
 		return nil, err
