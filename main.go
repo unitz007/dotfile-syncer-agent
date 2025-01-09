@@ -43,10 +43,9 @@ func main() {
 	syncer := NewCustomerSyncer(config, brokerNotifier, mutex, git)
 	syncHandler := NewSyncHandler(&syncer, git, sseServer)
 	brokerNotifier.RegisterStream()
-	contextDeadline := 4 * time.Second
+	contextDeadline := 15 * time.Second
 
 	go func() {
-
 		func(httpClient *http.Client, syncer Syncer) {
 			ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(contextDeadline))
 			request, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
@@ -59,12 +58,19 @@ func main() {
 				case <-ticker.C:
 					now := time.Now()
 					deadLineTime, _ := request.Context().Deadline()
-					if now.After(deadLineTime) {
+					oneSecondBeforeDeadline := deadLineTime.Add(-1 * time.Second) // this makes sure the connection is refreshed one second before the context's deadline
+
+					if now.After(oneSecondBeforeDeadline) {
 						now = time.Now()
 						ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(contextDeadline))
 						request = request.WithContext(ctx)
 					} else {
-						res, _ := httpClient.Do(request)
+						res, err := httpClient.Do(request)
+						if err != nil {
+							Error(err.Error())
+							return
+						}
+
 						err = res.Write(SseClient{syncer})
 					}
 				}
