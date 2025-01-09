@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"github.com/r3labs/sse/v2"
+	"io"
 	"time"
 
 	//"github.com/robfig/cron/v3"
@@ -43,12 +44,23 @@ func main() {
 	syncer := NewCustomerSyncer(config, brokerNotifier, mutex, git)
 	syncHandler := NewSyncHandler(&syncer, git, sseServer)
 	brokerNotifier.RegisterStream()
-	contextDeadline := 15 * time.Second
+	lock := false
 
 	go func() {
+		requestPool := func() []*http.Request {
+
+			var c []*http.Request
+
+			ctx1, _ := context.WithDeadline(context.Background(), time.Now().Add(10*time.Second))
+			req1, _ := http.NewRequestWithContext(ctx1, http.MethodGet, *webhookUrl, nil)
+
+			ctx2, _ := context.WithDeadline(context.Background(), time.Now().Add(10*time.Second))
+			req2, _ := http.NewRequestWithContext(ctx2, http.MethodGet, *webhookUrl, nil)
+
+			return append(c, req1, req2)
+		}()
+
 		func(httpClient *http.Client, syncer Syncer) {
-			ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(contextDeadline))
-			request, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
 			ticker := time.NewTicker(5 * time.Second)
 			done := make(chan bool)
 			for {
@@ -56,22 +68,36 @@ func main() {
 				case <-done:
 					ticker.Stop()
 				case <-ticker.C:
-					now := time.Now()
-					deadLineTime, _ := request.Context().Deadline()
-					oneSecondBeforeDeadline := deadLineTime.Add(-1 * time.Second) // this makes sure the connection is refreshed one second before the context's deadline
+					for i, request := range requestPool {
+						go func() {
+							resp, err := httpClient.Do(request)
+							if err != nil {
+								return
+							}
 
-					if now.After(oneSecondBeforeDeadline) {
-						now = time.Now()
-						ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(contextDeadline))
-						request = request.WithContext(ctx)
-					} else {
-						res, err := httpClient.Do(request)
-						if err != nil {
-							Error(err.Error())
-							return
-						}
+							defer func(Body io.ReadCloser) {
+								err := Body.Close()
+								if err != nil {
+									return
+								}
+							}(resp.Body)
 
-						err = res.Write(SseClient{syncer})
+							if lock == false {
+								lock = true
+								err = resp.Write(SseClient{syncer})
+								lock = false
+							}
+
+							now := time.Now()
+							deadLineTime, _ := request.Context().Deadline()
+							oneSecondBeforeDeadline := deadLineTime.Add(-1 * time.Second) // this makes sure the connection is refreshed one second before the context's deadline
+
+							if now.After(oneSecondBeforeDeadline) {
+								ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(30*time.Second))
+								r, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
+								requestPool[i] = r
+							}
+						}()
 					}
 				}
 			}
