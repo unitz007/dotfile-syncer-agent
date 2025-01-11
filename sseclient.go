@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"strconv"
 	"strings"
 )
 
@@ -28,9 +27,7 @@ func (w *SseClient) Write(p []byte) (n int, err error) {
 		if commitRef != "" {
 			branch := strings.Split(commitRef, "/")[2]
 			if branch == "main" { // only triggers sync on push to main branch
-
-				Infoln("Sync by", strconv.Itoa(w.req))
-				go w.Syncer.Sync(ConsoleSyncConsumer)
+				w.Syncer.Sync(ConsoleSyncConsumer)
 			}
 		}
 	}

@@ -50,11 +50,7 @@ func main() {
 	req1Deadline := 5 * time.Second
 	//req2Deadline := 4 * time.Second
 
-	var resp *struct {
-		res *http.Response
-		val int
-	}
-
+	var resp *http.Response
 	go func() {
 		go func() {
 			t := time.NewTicker(5 * time.Second)
@@ -67,13 +63,10 @@ func main() {
 					response, err := httpClient.Do(req)
 					if err != nil {
 						Error(err.Error())
-						return
+					} else {
+						resp = response
 					}
 
-					resp = &struct {
-						res *http.Response
-						val int
-					}{response, 1}
 				}
 			}
 		}()
@@ -89,13 +82,9 @@ func main() {
 					response, err := httpClient.Do(req)
 					if err != nil {
 						Error(err.Error())
-						return
+					} else {
+						resp = response
 					}
-
-					resp = &struct {
-						res *http.Response
-						val int
-					}{response, 2}
 				}
 			}
 		}()
@@ -106,8 +95,10 @@ func main() {
 				select {
 				case <-t.C:
 					if resp != nil {
-						sseClient.req = resp.val
-						_ = resp.res.Write(sseClient)
+						_ = resp.Write(sseClient)
+						_ = resp.Body.Close()
+						resp = nil
+
 					}
 				}
 			}
