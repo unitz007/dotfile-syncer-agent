@@ -7,9 +7,7 @@ import (
 )
 
 type SseClient struct {
-	req    int
 	Syncer Syncer
-	//lock   bool
 }
 
 func (w *SseClient) Write(p []byte) (n int, err error) {

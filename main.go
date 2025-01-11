@@ -98,12 +98,27 @@ func main() {
 						_ = resp.Write(sseClient)
 						_ = resp.Body.Close()
 						resp = nil
-
 					}
 				}
 			}
 		}()
 
+	}()
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				localCommit, _ := git.LocalCommit()
+				remoteCommit, _ := git.RemoteCommit()
+				isSync := git.IsSync(localCommit, remoteCommit)
+				if !isSync {
+					Infoln("Triggering Automatic Sync")
+					syncer.Sync(ConsoleSyncConsumer)
+				}
+			}
+		}
 	}()
 
 	Infoln("Listening on webhook url", *webhookUrl)
