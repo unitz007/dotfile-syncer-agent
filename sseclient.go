@@ -3,19 +3,21 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
 type SseClient struct {
 	req    int
 	Syncer Syncer
+	//lock   bool
 }
 
-func (w SseClient) Write(p []byte) (n int, err error) {
+func (w *SseClient) Write(p []byte) (n int, err error) {
+
 	_, after, found := bytes.Cut(p, []byte("data:"))
 	if found {
 		sAfter := strings.TrimSpace(string(after))
-		//fmt.Println(strconv.Itoa(w.req), sAfter)
 		var commit *GitWebHookCommitResponse
 		err = json.Unmarshal([]byte(sAfter), &commit)
 		if err != nil {
@@ -26,6 +28,8 @@ func (w SseClient) Write(p []byte) (n int, err error) {
 		if commitRef != "" {
 			branch := strings.Split(commitRef, "/")[2]
 			if branch == "main" { // only triggers sync on push to main branch
+
+				Infoln("Sync by", strconv.Itoa(w.req))
 				go w.Syncer.Sync(ConsoleSyncConsumer)
 			}
 		}
