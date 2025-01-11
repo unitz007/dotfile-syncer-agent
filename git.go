@@ -106,7 +106,6 @@ func (g Git) CloneOrPullRepository() error {
 	}
 
 	return func() error {
-
 		repoPath := path.Join(g.config.DotfilePath, g.config.GitRepository)
 		_, err = os.Stat(repoPath) // checks if repo already exists
 		if err != nil {

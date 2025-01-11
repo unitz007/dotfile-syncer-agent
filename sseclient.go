@@ -7,6 +7,7 @@ import (
 )
 
 type SseClient struct {
+	req    int
 	Syncer Syncer
 }
 
@@ -14,6 +15,7 @@ func (w SseClient) Write(p []byte) (n int, err error) {
 	_, after, found := bytes.Cut(p, []byte("data:"))
 	if found {
 		sAfter := strings.TrimSpace(string(after))
+		//fmt.Println(strconv.Itoa(w.req), sAfter)
 		var commit *GitWebHookCommitResponse
 		err = json.Unmarshal([]byte(sAfter), &commit)
 		if err != nil {
