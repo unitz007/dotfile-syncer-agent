@@ -44,6 +44,8 @@ func (c customSync) Sync(consumers ...Consumer) {
 	c.mutex.Lock()
 	ch := make(chan SyncEvent)
 
+	notify(&Git{c.config}, c.brokerNotifier)
+
 	go func() {
 		steps := syncSteps(c.git)
 
@@ -57,8 +59,6 @@ func (c customSync) Sync(consumers ...Consumer) {
 				Done      bool   `json:"done"`
 			}{Progress: 0, IsSuccess: true, Done: false},
 		}
-
-		notify(&Git{c.config}, c.brokerNotifier)
 
 		ch <- event
 
@@ -82,16 +82,13 @@ func (c customSync) Sync(consumers ...Consumer) {
 				}
 			}
 			ch <- event
-
 		}
 
 		close(ch)
 	}()
 
-	notify(&Git{c.config}, c.brokerNotifier)
-
 	consumers = append(consumers, func(event SyncEvent) {
-		c.brokerNotifier.SyncTrigger(event)
+		c.brokerNotifier.SyncEvent(event)
 	})
 
 	for event := range ch {
@@ -101,21 +98,9 @@ func (c customSync) Sync(consumers ...Consumer) {
 		time.Sleep(1 * time.Second)
 	}
 
+	notify(&Git{c.config}, c.brokerNotifier)
 	c.mutex.Unlock()
 }
-
-//func (c customSync) Consume(ch chan SyncEvent, consumers ...Consumer) {
-//	consumers = append(consumers, func(event SyncEvent) {
-//		c.brokerNotifier.SyncTrigger(event)
-//	})
-//
-//	for event := range ch {
-//		for _, consumer := range consumers {
-//			go consumer(event)
-//		}
-//		time.Sleep(1 * time.Second)
-//	}
-//}
 
 // Recursively parses YAML and generates file paths.
 func parseYAMLToPaths(data string) ([]string, error) {

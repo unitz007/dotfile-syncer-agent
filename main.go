@@ -3,28 +3,24 @@ package main
 import (
 	"context"
 	"github.com/r3labs/sse/v2"
-	"time"
-
-	//"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"net/http"
 	"os"
 	"sync"
+	"time"
 )
 
 func main() {
 	var (
-		//cronJob        = cron.New()
-		rootCmd        = cobra.Command{}
-		mux            = http.NewServeMux()
-		sseServer      = sse.New()
-		brokerNotifier = NewBrokerNotifier()
-		port           = rootCmd.Flags().StringP("port", "p", DefaultPort, "HTTP port to run on")
-		webhookUrl     = rootCmd.Flags().StringP("webhook", "w", "", "git webhook url")
-		dotFilePath    = rootCmd.Flags().StringP("dotfile-path", "d", "", "path to dotfile directory")
-		configDir      = rootCmd.Flags().StringP("config-dir", "c", "", "path to config directory")
-		gitUrl         = rootCmd.Flags().StringP("git-url", "g", "", "github api url")
-		gitApiBaseUrl  = rootCmd.Flags().StringP("git-api-base-url", "b", "https://api.github.com", "github api url")
+		rootCmd       = cobra.Command{}
+		mux           = http.NewServeMux()
+		sseServer     = sse.New()
+		port          = rootCmd.Flags().StringP("port", "p", DefaultPort, "HTTP port to run on")
+		webhookUrl    = rootCmd.Flags().StringP("webhook", "w", "", "git webhook url")
+		dotFilePath   = rootCmd.Flags().StringP("dotfile-path", "d", "", "path to dotfile directory")
+		configDir     = rootCmd.Flags().StringP("config-dir", "c", "", "path to config directory")
+		gitUrl        = rootCmd.Flags().StringP("git-url", "g", "", "github api url")
+		gitApiBaseUrl = rootCmd.Flags().StringP("git-api-base-url", "b", "https://api.github.com", "github api url")
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -39,16 +35,14 @@ func main() {
 	}
 
 	git := &Git{config}
+	brokerNotifier := NewBrokerNotifier(git)
 	mutex := &sync.Mutex{}
 	syncer := NewCustomerSyncer(config, brokerNotifier, mutex, git)
 	syncHandler := NewSyncHandler(&syncer, git, sseServer)
 	brokerNotifier.RegisterStream()
-	//lock := false
 	httpClient := &http.Client{}
 	sseClient := &SseClient{Syncer: syncer}
-
-	req1Deadline := 5 * time.Second
-	//req2Deadline := 4 * time.Second
+	deadline := 5 * time.Second
 
 	var resp *http.Response
 	go func() {
@@ -57,16 +51,14 @@ func main() {
 			for {
 				select {
 				case <-t.C:
-					ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(req1Deadline))
+					ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(deadline))
 					req, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
-
 					response, err := httpClient.Do(req)
 					if err != nil {
 						Error(err.Error())
 					} else {
 						resp = response
 					}
-
 				}
 			}
 		}()
@@ -76,9 +68,8 @@ func main() {
 			for {
 				select {
 				case <-t.C:
-					ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(req1Deadline))
+					ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(deadline))
 					req, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
-
 					response, err := httpClient.Do(req)
 					if err != nil {
 						Error(err.Error())
@@ -102,7 +93,6 @@ func main() {
 				}
 			}
 		}()
-
 	}()
 
 	go func() {

@@ -7,14 +7,27 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 )
 
 type BrokerNotifier struct {
 	machine   string
 	brokerUrl string
+	git       *Git
 }
 
-func NewBrokerNotifier() *BrokerNotifier {
+type SyncStatus struct {
+	LocalCommit  string `json:"local_commit"`
+	RemoteCommit string `json:"remote_commit"`
+	IsSync       bool   `json:"is_sync"`
+}
+
+type Machine struct {
+	Id         string     `json:"_id"`
+	SyncStatus SyncStatus `json:"sync_details"`
+}
+
+func NewBrokerNotifier(git *Git) *BrokerNotifier {
 
 	machine := os.Getenv("DOTFILE_MACHINE_ID")
 	brokerUrl := os.Getenv("DOTFILE_BROKER_URL")
@@ -23,13 +36,13 @@ func NewBrokerNotifier() *BrokerNotifier {
 		Infoln("Broker notifier is enabled")
 	}
 
-	return &BrokerNotifier{machine, brokerUrl}
+	return &BrokerNotifier{machine, brokerUrl, git}
 }
 
-func (b BrokerNotifier) SyncTrigger(payload SyncEvent) {
+func (b BrokerNotifier) SyncEvent(payload SyncEvent) {
 	if b.machine != "" && b.brokerUrl != "" {
 		v, _ := json.Marshal(payload)
-		request, err := http.NewRequest("POST", b.brokerUrl+"/sync-trigger/"+b.machine+"/notify", bytes.NewBuffer(v))
+		request, err := http.NewRequest("POST", b.brokerUrl+"/machines/"+b.machine+"/sync-event", bytes.NewBuffer(v))
 		if err != nil {
 			Error("Failed to send notification to broker:", err.Error())
 			return
@@ -53,7 +66,7 @@ func (b BrokerNotifier) SyncStatus(payload any) {
 	if b.machine != "" && b.brokerUrl != "" {
 		go func() {
 			v, _ := json.Marshal(payload)
-			request, _ := http.NewRequest("POST", b.brokerUrl+"/sync-status/"+b.machine+"/notify", bytes.NewBuffer(v))
+			request, _ := http.NewRequest("POST", b.brokerUrl+"/machines/"+b.machine+"/sync-status", bytes.NewBuffer(v))
 			request.Header.Set("Content-Type", "application/json")
 			response, err := http.DefaultClient.Do(request)
 			if err != nil {
@@ -72,7 +85,22 @@ func (b BrokerNotifier) SyncStatus(payload any) {
 func (b BrokerNotifier) RegisterStream() {
 	if b.machine != "" && b.brokerUrl != "" {
 		go func() {
-			res, err := http.Post(b.brokerUrl+"/machines/"+b.machine, "application/json", nil)
+
+			localCommit, _ := b.git.LocalCommit()
+			machine := Machine{
+				Id: b.machine,
+				SyncStatus: SyncStatus{
+					LocalCommit: localCommit.Id,
+				},
+			}
+
+			body, err := json.Marshal(machine)
+			if err != nil {
+				Error("Failed to marshal machine:", err.Error())
+				return
+			}
+
+			res, err := http.Post(b.brokerUrl+"/machines", "application/json", strings.NewReader(string(body)))
 			if err != nil {
 				Error("Unable to send broker notifier:", err.Error())
 				return

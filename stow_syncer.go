@@ -131,7 +131,7 @@ type stowSyncer struct {
 //
 //	// default consumers
 //	consumers = append(consumers, func(event SyncEvent) {
-//		s.brokerNotifier.SyncTrigger(event)
+//		s.brokerNotifier.SyncEvent(event)
 //	})
 //
 //	for event := range ch {
