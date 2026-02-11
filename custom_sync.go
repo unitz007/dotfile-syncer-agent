@@ -3,29 +3,36 @@ package main
 import (
 	"errors"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"os/exec"
 	"path"
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
+const directorySuffix = ";" // Suffix used in config to denote directories
+
+// customSync implements the Syncer interface using a custom YAML-based configuration.
+// It parses dotfile-config.yaml to determine which files to sync and where.
 type customSync struct {
-	config         *Configurations
-	mutex          *sync.Mutex
-	brokerNotifier *BrokerNotifier
-	ch             chan SyncEvent
-	git            *Git
+	config         *Configurations // Agent configuration
+	mutex          *sync.Mutex     // Mutex to prevent concurrent syncs
+	brokerNotifier *BrokerNotifier // Notifier for sending events to broker
+	ch             chan SyncEvent  // Channel for sync events
+	git            *Git            // Git instance for repository operations
 }
 
+// ConfigPathInfo contains information about a file or directory to be synced
 type ConfigPathInfo struct {
-	Src   *os.File
-	Dest  string
-	IsDir bool
+	Src   *os.File // Source file handle in the repository
+	Dest  string   // Destination path on the system
+	IsDir bool     // Whether this is a directory (ends with ;)
 }
 
+// NewCustomerSyncer creates a new custom syncer instance
 func NewCustomerSyncer(
 	config *Configurations,
 	brokerNotifier *BrokerNotifier,
@@ -40,6 +47,9 @@ func NewCustomerSyncer(
 	}
 }
 
+// Sync performs the dotfile synchronization process.
+// It executes a series of steps: git checkout, config parsing, and file copying.
+// Progress is reported to all registered consumers via SyncEvent messages.
 func (c customSync) Sync(consumers ...Consumer) {
 	c.mutex.Lock()
 	ch := make(chan SyncEvent)
@@ -87,10 +97,12 @@ func (c customSync) Sync(consumers ...Consumer) {
 		close(ch)
 	}()
 
+	// Add broker notifier as a consumer
 	consumers = append(consumers, func(event SyncEvent) {
 		c.brokerNotifier.SyncEvent(event)
 	})
 
+	// Send events to all consumers
 	for event := range ch {
 		for _, consumer := range consumers {
 			consumer(event)
@@ -102,7 +114,8 @@ func (c customSync) Sync(consumers ...Consumer) {
 	c.mutex.Unlock()
 }
 
-// Recursively parses YAML and generates file paths.
+// parseYAMLToPaths recursively parses the YAML configuration and generates file paths.
+// It converts the nested YAML structure into flat paths like "home/.bashrc" or "home/.config/nvim;".
 func parseYAMLToPaths(data string) ([]string, error) {
 	var rawData map[string]interface{}
 	if err := yaml.Unmarshal([]byte(data), &rawData); err != nil {
@@ -115,7 +128,8 @@ func parseYAMLToPaths(data string) ([]string, error) {
 	return paths, nil
 }
 
-// Recursive helper to process YAML nodes and form paths.
+// generatePaths is a recursive helper that processes YAML nodes and forms paths.
+// It handles both files (strings) and nested directories (maps).
 func generatePaths(node map[string]interface{}, currentPath string, paths *[]string) {
 	for key, value := range node {
 		// Update the current path with the map key
@@ -138,6 +152,8 @@ func generatePaths(node map[string]interface{}, currentPath string, paths *[]str
 	}
 }
 
+// syncSteps defines the sequence of operations for synchronization.
+// Each step has a description and an action function that performs the work.
 func syncSteps(git *Git) []struct {
 	Step   string
 	Action func() error
@@ -176,6 +192,7 @@ func syncSteps(git *Git) []struct {
 						return nil, err
 					}
 
+					// Replace 'home' with actual home directory path
 					yamlToPaths = func() []string {
 						var p []string
 						for _, yamlPath := range yamlToPaths {
@@ -195,6 +212,7 @@ func syncSteps(git *Git) []struct {
 					return err
 				}
 
+				// Match config paths with actual files in repository
 				dirs, err := os.ReadDir(wd)
 				for _, info := range dirs {
 					f, err := os.Open(path.Join(wd, info.Name()))
@@ -207,9 +225,9 @@ func syncSteps(git *Git) []struct {
 							if strings.Contains(c, info.Name()) {
 								configPathsInfo = append(configPathsInfo, ConfigPathInfo{
 									Src:  f,
-									Dest: strings.TrimSuffix(c, ";"),
+									Dest: strings.TrimSuffix(c, directorySuffix),
 									IsDir: func() bool {
-										return strings.HasSuffix(c, ";")
+										return strings.HasSuffix(c, directorySuffix)
 									}(),
 								})
 							}
@@ -224,6 +242,7 @@ func syncSteps(git *Git) []struct {
 			Step: "Copy dotfiles to configured locations",
 			Action: func() error {
 				for _, configPathInfo := range configPathsInfo {
+					// Create parent directory if it doesn't exist
 					u, _ := path.Split(configPathInfo.Dest)
 					_, err := os.Stat(u)
 					if err != nil {
@@ -232,6 +251,7 @@ func syncSteps(git *Git) []struct {
 
 					s, _ := path.Split(configPathInfo.Dest)
 
+					// Copy file or directory to destination
 					_, err = exec.Command("cp", "-r", configPathInfo.Src.Name(), s).CombinedOutput()
 					if err != nil {
 						return fmt.Errorf("could not copy %s to destination %s", configPathInfo.Src.Name(), s)
@@ -244,6 +264,8 @@ func syncSteps(git *Git) []struct {
 	}
 }
 
+// notify sends the current sync status to the broker.
+// It compares local and remote commits and sends the result.
 func notify(git *Git, brokerNotifier *BrokerNotifier) {
 	localCommit, err := git.LocalCommit()
 	if err != nil {

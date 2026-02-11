@@ -9,18 +9,22 @@ import (
 	"strings"
 )
 
+// Configurations holds all configuration settings for the dotfile agent
 type Configurations struct {
-	DotfilePath     string
-	WebHook         string
-	Port            string
-	GithubToken     string
-	ConfigPath      string
-	GitUrl          string
-	GitRepository   string
-	RepositoryOwner string
-	GitApiBaseUrl   string
+	DotfilePath     string // Local directory where dotfiles repository is cloned
+	WebHook         string // Git webhook URL for receiving push notifications
+	Port            string // HTTP port for the agent server
+	GithubToken     string // GitHub personal access token for API authentication
+	ConfigPath      string // Directory for agent configuration and database files
+	GitUrl          string // Full Git repository URL (e.g., https://github.com/user/repo.git)
+	GitRepository   string // Repository name extracted from GitUrl
+	RepositoryOwner string // Repository owner/organization extracted from GitUrl
+	GitApiBaseUrl   string // Base URL for Git API (default: https://api.github.com)
 }
 
+// InitializeConfigurations creates and validates the agent configuration.
+// It reads from environment variables, command-line flags, and sets up necessary directories.
+// Returns an error if required configuration (like GITHUB_TOKEN) is missing.
 func InitializeConfigurations(
 	dotfilePath string,
 	webHook string,
@@ -29,11 +33,13 @@ func InitializeConfigurations(
 	gitUrl string,
 	githubApiBaseUrl string) (*Configurations, error) {
 
+	// GitHub token is required for API access
 	gitToken, ok := os.LookupEnv("GITHUB_TOKEN")
 	if !ok {
 		return nil, errors.New("no GITHUB_TOKEN environment variable found")
 	}
 
+	// Set default dotfile path if not provided
 	if dotfilePath == "" {
 		homeDir, err := os.UserConfigDir()
 		if err != nil {
@@ -43,6 +49,7 @@ func InitializeConfigurations(
 		dotfilePath = path.Join(homeDir, "dotfiles")
 	}
 
+	// Set up configuration directory
 	configPath, err := func() (string, error) {
 		if configPath == "" {
 			configPath, err := os.UserConfigDir()
@@ -50,6 +57,7 @@ func InitializeConfigurations(
 				return "", err
 			}
 
+			// Create dotfile-agent config directory if it doesn't exist
 			if _, err = os.Stat(path.Join(configPath, "dotfile-agent")); err != nil && os.IsNotExist(err) {
 				err := os.Mkdir(path.Join(configPath, "dotfile-agent"), 0700)
 				if err != nil {
@@ -60,6 +68,7 @@ func InitializeConfigurations(
 
 			}
 		} else {
+			// Validate provided config path exists
 			_, err := os.Stat(configPath)
 			if err != nil {
 				return "", err
@@ -68,17 +77,20 @@ func InitializeConfigurations(
 		return configPath, nil
 	}()
 
+	// Extract repository name from Git URL
 	repoName, err := getRepoValue(gitUrl, "repository")
 	if err != nil {
 		return nil, err
 	}
 
+	// Extract repository owner from Git URL
 	repoOwner, err := getRepoValue(gitUrl, "repoOwner")
 
 	if err != nil {
 		return nil, err
 	}
 
+	// Log all configuration values for debugging
 	// ################## CONFIGURATIONS ##################
 	Infoln("Configuration Path ->", configPath)
 	Infoln("Dotfile Path ->", dotfilePath)
@@ -110,6 +122,9 @@ func InitializeConfigurations(
 
 }
 
+// getRepoValue extracts repository information from a Git URL.
+// filter can be "repository" (returns repo name) or "repoOwner" (returns owner/org name).
+// Expects URLs in format: https://github.com/owner/repository.git
 func getRepoValue(gitUrl string, filter string) (string, error) {
 	parsedURL, err := url.Parse(gitUrl)
 	if err != nil {

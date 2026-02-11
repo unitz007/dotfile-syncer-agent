@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"github.com/r3labs/sse/v2"
-	"github.com/spf13/cobra"
 	"net/http"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/r3labs/sse/v2"
+	"github.com/spf13/cobra"
 )
 
 func main() {
@@ -37,7 +38,7 @@ func main() {
 	git := &Git{config}
 	brokerNotifier := NewBrokerNotifier(git)
 	mutex := &sync.Mutex{}
-	syncer := NewCustomerSyncer(config, brokerNotifier, mutex, git)
+	syncer := NewEnhancedSyncer(config, brokerNotifier, mutex, git)
 	syncHandler := NewSyncHandler(&syncer, git, sseServer)
 	brokerNotifier.RegisterStream()
 	httpClient := &http.Client{}
@@ -62,23 +63,23 @@ func main() {
 				}
 			}
 		}()
-
-		go func() {
-			t := time.NewTicker(5 * time.Second)
-			for {
-				select {
-				case <-t.C:
-					ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(deadline))
-					req, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
-					response, err := httpClient.Do(req)
-					if err != nil {
-						Error(err.Error())
-					} else {
-						resp = response
-					}
-				}
-			}
-		}()
+		//
+		//go func() {
+		//	t := time.NewTicker(5 * time.Second)
+		//	for {
+		//		select {
+		//		case <-t.C:
+		//			ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(deadline))
+		//			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, *webhookUrl, nil)
+		//			response, err := httpClient.Do(req)
+		//			if err != nil {
+		//				Error(err.Error())
+		//			} else {
+		//				resp = response
+		//			}
+		//		}
+		//	}
+		//}()
 
 		go func() {
 			t := time.NewTicker(1 * time.Second)

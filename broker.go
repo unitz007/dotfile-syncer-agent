@@ -10,23 +10,30 @@ import (
 	"strings"
 )
 
+// BrokerNotifier handles communication with an external broker service for monitoring and notifications.
+// It sends sync events and status updates to a centralized broker for multi-machine coordination.
 type BrokerNotifier struct {
-	machine   string
-	brokerUrl string
-	git       *Git
+	machine   string // Unique machine identifier from DOTFILE_MACHINE_ID env var
+	brokerUrl string // Broker service URL from DOTFILE_BROKER_URL env var
+	git       *Git   // Git instance for accessing repository information
 }
 
+// SyncStatus represents the synchronization state sent to the broker
 type SyncStatus struct {
-	LocalCommit  string `json:"local_commit"`
-	RemoteCommit string `json:"remote_commit"`
-	IsSync       bool   `json:"is_sync"`
+	LocalCommit  string `json:"local_commit"`  // Local repository commit SHA
+	RemoteCommit string `json:"remote_commit"` // Remote repository commit SHA
+	IsSync       bool   `json:"is_sync"`       // Whether local and remote are synchronized
 }
 
+// Machine represents a machine registered with the broker service
 type Machine struct {
-	Id         string     `json:"_id"`
-	SyncStatus SyncStatus `json:"sync_details"`
+	Id         string     `json:"_id"`          // Unique machine identifier
+	SyncStatus SyncStatus `json:"sync_details"` // Current sync status of the machine
 }
 
+// NewBrokerNotifier creates a new BrokerNotifier instance.
+// It reads configuration from environment variables DOTFILE_MACHINE_ID and DOTFILE_BROKER_URL.
+// If either is missing, the broker functionality is disabled but the agent continues to work.
 func NewBrokerNotifier(git *Git) *BrokerNotifier {
 
 	machine := os.Getenv("DOTFILE_MACHINE_ID")
@@ -39,6 +46,9 @@ func NewBrokerNotifier(git *Git) *BrokerNotifier {
 	return &BrokerNotifier{machine, brokerUrl, git}
 }
 
+// SyncEvent sends a sync progress event to the broker service.
+// This allows real-time monitoring of sync operations across multiple machines.
+// Only sends if both machine ID and broker URL are configured.
 func (b BrokerNotifier) SyncEvent(payload SyncEvent) {
 	if b.machine != "" && b.brokerUrl != "" {
 		v, _ := json.Marshal(payload)
@@ -62,6 +72,9 @@ func (b BrokerNotifier) SyncEvent(payload SyncEvent) {
 	}
 }
 
+// SyncStatus sends the current sync status to the broker service.
+// This updates the broker with the latest local/remote commit information.
+// Runs asynchronously in a goroutine to avoid blocking the sync process.
 func (b BrokerNotifier) SyncStatus(payload any) {
 	if b.machine != "" && b.brokerUrl != "" {
 		go func() {
@@ -82,11 +95,19 @@ func (b BrokerNotifier) SyncStatus(payload any) {
 	}
 }
 
+// RegisterStream registers this machine with the broker service.
+// It sends the machine ID and current local commit information.
+// This is called on startup to announce the machine's presence to the broker.
+// Runs asynchronously in a goroutine.
 func (b BrokerNotifier) RegisterStream() {
 	if b.machine != "" && b.brokerUrl != "" {
 		go func() {
 
-			localCommit, _ := b.git.LocalCommit()
+			localCommit, err := b.git.LocalCommit()
+			if err != nil {
+				Error("Failed to get local commit:", err.Error())
+				return
+			}
 			machine := Machine{
 				Id: b.machine,
 				SyncStatus: SyncStatus{

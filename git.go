@@ -11,10 +11,13 @@ import (
 	"strings"
 )
 
+// Git provides operations for interacting with Git repositories and the GitHub API
 type Git struct {
-	config *Configurations
+	config *Configurations // Agent configuration containing repository details
 }
 
+// RemoteCommit fetches the latest commit from the remote GitHub repository using the GitHub API.
+// Returns the commit SHA and timestamp of the HEAD commit on the default branch.
 func (g Git) RemoteCommit() (*Commit, error) {
 	gitUrl, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/commits", g.config.GitApiBaseUrl, g.config.RepositoryOwner, g.config.GitRepository))
 	if err != nil {
@@ -58,6 +61,8 @@ func (g Git) RemoteCommit() (*Commit, error) {
 	return commit, nil
 }
 
+// LocalCommit retrieves the latest commit from the local Git repository.
+// It executes 'git log HEAD -1' to get the most recent commit information.
 func (g Git) LocalCommit() (*Commit, error) {
 	err := os.Chdir(g.config.DotfilePath + string(os.PathSeparator) + g.config.GitRepository)
 	if err != nil {
@@ -89,6 +94,8 @@ func (g Git) LocalCommit() (*Commit, error) {
 	return commit, nil
 }
 
+// IsSync compares local and remote commits to determine if they are synchronized.
+// Returns true if both commits have the same SHA, false otherwise.
 func (g Git) IsSync(localCommit, remoteCommit *Commit) bool {
 
 	if localCommit == nil || remoteCommit == nil {
@@ -98,6 +105,9 @@ func (g Git) IsSync(localCommit, remoteCommit *Commit) bool {
 	return localCommit.Id == remoteCommit.Id
 }
 
+// CloneOrPullRepository clones the repository if it doesn't exist locally,
+// or pulls the latest changes if it already exists.
+// This ensures the local repository is up-to-date with the remote.
 func (g Git) CloneOrPullRepository() error {
 
 	git, err := exec.LookPath("git")
@@ -109,6 +119,7 @@ func (g Git) CloneOrPullRepository() error {
 		repoPath := path.Join(g.config.DotfilePath, g.config.GitRepository)
 		_, err = os.Stat(repoPath) // checks if repo already exists
 		if err != nil {
+			// Repository doesn't exist, clone it
 			err = os.Chdir(g.config.DotfilePath)
 			if err != nil {
 				return err
@@ -121,6 +132,7 @@ func (g Git) CloneOrPullRepository() error {
 
 			return os.Chdir(g.config.GitRepository)
 		} else {
+			// Repository exists, pull latest changes
 			err = os.Chdir(repoPath)
 			if err != nil {
 				return err
