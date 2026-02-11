@@ -1,0 +1,176 @@
+# Enhanced Dotfile Agent Configuration
+# 
+# This format includes installation commands as structured data
+# that can be parsed and used programmatically.
+#
+# Structure:
+#   software: Name of the software
+#   install: Installation command(s)
+#   files: List of dotfiles to sync
+#     - path: File/directory path (directories end with ;)
+#       target: Target location (home is replaced with $HOME)
+
+# Enhanced Dotfile Agent Configuration
+# 
+# This format includes installation commands as structured data
+# that can be parsed and used programmatically.
+#
+# Structure:
+#   software: Name of the software
+#   install: Installation command(s) - can be string or platform-specific map
+#   files: List of dotfiles to sync
+#     - path: File/directory path (directories end with ;)
+#       target: Target location (home is replaced with $HOME)
+#
+# Platform-specific installs:
+#   install:
+#     linux: apt install -y package
+#     darwin: brew install package
+#     windows: choco install package
+#
+# Supported platforms: linux, darwin (macOS), windows, freebsd, openbsd
+# Use 'all' for cross-platform commands (like curl scripts)
+
+dotfiles:
+  - software: bash
+    install:
+      linux: apt install -y bash
+      darwin: brew install bash
+    files:
+      - path: .bashrc
+        target: home
+      - path: .bash_profile
+        target: home
+      - path: .bash_aliases
+        target: home
+
+  - software: zsh
+    install:
+      linux: apt install -y zsh
+      darwin: brew install zsh
+    files:
+      - path: .zshrc
+        target: home
+      - path: .zsh_aliases
+        target: home
+      - path: zsh;
+        target: home/.config
+
+  - software: git
+    install:
+      linux: apt install -y git
+      darwin: brew install git
+      windows: choco install git
+    files:
+      - path: .gitconfig
+        target: home
+      - path: .gitignore_global
+        target: home
+      - path: git;
+        target: home/.config
+
+  - software: vim
+    install:
+      linux: apt install -y vim
+      darwin: brew install vim
+    files:
+      - path: .vimrc
+        target: home
+
+  - software: neovim
+    install:
+      linux: apt install -y neovim
+      darwin: brew install neovim
+      windows: choco install neovim
+    files:
+      - path: nvim;
+        target: home/.config
+
+  - software: tmux
+    install:
+      linux: apt install -y tmux
+      darwin: brew install tmux
+    files:
+      - path: .tmux.conf
+        target: home
+
+  - software: alacritty
+    install:
+      linux: apt install -y alacritty
+      darwin: brew install --cask alacritty
+    files:
+      - path: alacritty;
+        target: home/.config
+
+  - software: kitty
+    install:
+      linux: apt install -y kitty
+      darwin: brew install --cask kitty
+    files:
+      - path: kitty;
+        target: home/.config
+
+  - software: starship
+    install:
+      all: curl -sS https://starship.rs/install.sh | sh
+    files:
+      - path: starship.toml
+        target: home/.config
+
+  # Development tools
+#  - software: npm
+#    install:
+#      linux: apt install -y npm
+#      darwin: brew install node
+#      windows: choco install nodejs
+#    files:
+#      - path: .npmrc
+#        target: home
+#
+#  - software: yarn
+#    install:
+#      all: npm install -g yarn
+#    files:
+#      - path: .yarnrc
+#        target: home
+
+#  - software: rust
+#    install:
+#      all: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+#    files:
+#      - path: .cargo/config.toml
+#        target: home
+#
+#  - software: docker
+#    install:
+#      linux: apt install -y docker.io
+#      darwin: brew install --cask docker
+#      windows: choco install docker-desktop
+#    files:
+#      - path: .docker/config.json
+#        target: home
+#
+#  - software: awscli
+#    install:
+#      linux: apt install -y awscli
+#      darwin: brew install awscli
+#      windows: choco install awscli
+#    files:
+#      - path: .aws/config
+#        target: home
+#
+#  - software: kubectl
+#    install:
+#      linux: snap install kubectl --classic
+#      darwin: brew install kubectl
+#      windows: choco install kubernetes-cli
+#    files:
+#      - path: .kube/config
+#        target: home
+
+# SECURITY WARNING:
+# Never include sensitive files like:
+#   - Private SSH keys (.ssh/id_rsa, .ssh/id_ed25519)
+#   - AWS credentials (.aws/credentials)
+#   - API tokens or passwords
+#   - GPG private keys
