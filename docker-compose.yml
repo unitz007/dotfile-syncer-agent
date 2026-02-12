@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  dotfile-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dotfile-agent
+    ports:
+      - "2000:2000"
+    environment:
+      # Required: Set your GitHub token
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      
+      # Optional: Broker configuration
+      - DOTFILE_MACHINE_ID=${DOTFILE_MACHINE_ID:-test-machine-001}
+      - DOTFILE_BROKER_URL=${DOTFILE_BROKER_URL:-}
+#    volumes:
+#      # Persist dotfiles and configuration
+#      - dotfiles-data:/home/dotfile/dotfiles
+#      - config-data:/home/dotfile/.config/dotfile-agent
+      
+      # Optional: Mount local dotfile-config.yaml for testing
+      # - ./dotfile-config.yaml:/home/dotfile/dotfiles/dotfile-config.yaml:ro
+    command:
+      - --port=2000
+      - --git-url=${GIT_URL:-https://github.com/unitz007/dotfiles.git}
+      # - --webhook=${WEBHOOK_URL:-}
+      - --dotfile-path=/home/dotfile/dotfiles
+      - --config-dir=/home/dotfile/.config/dotfile-agent
+    restart: unless-stopped
+    networks:
+      - dotfile-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:2000/sync"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+#volumes:
+#  dotfiles-data:
+#    driver: local
+#  config-data:
+#    driver: local
+
+networks:
+  dotfile-network:
+    driver: bridge
