@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+.fleet
+
+# Documentation
+README.md
+CODEBASE_OVERVIEW.md
+
+# Scripts
+setup-ubuntu.sh
+install.sh
+sample-launchd-config.plist
+
+# Build artifacts
+dotfile-agent
+*.doclite
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Test files
+dotfiles/
+.config/
+
+# Logs
+*.log
