@@ -44,7 +44,9 @@ func InstallSoftware(configPath string, interactive bool) error {
 		}
 	}
 
-	fmt.Println("\nStarting installation...\n")
+	fmt.Println()
+	fmt.Println("Starting installation...")
+	fmt.Println()
 
 	successCount := 0
 	failedPackages := []string{}
@@ -141,7 +143,7 @@ func ShowPlatformInfo(configPath string) error {
 
 	fmt.Printf("Current platform: %s\n\n", currentPlatform)
 	fmt.Println("Platform-specific installation commands:")
-	fmt.Println("==========================================\n")
+	fmt.Println("==========================================")
 
 	for _, entry := range config.Dotfiles {
 		fmt.Printf("%s:\n", entry.Software)

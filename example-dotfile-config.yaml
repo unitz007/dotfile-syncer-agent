@@ -1,0 +1,80 @@
+# Example Enhanced Dotfile Configuration
+# This file demonstrates automatic software installation during sync
+
+dotfiles:
+  # Essential shell tools
+  - software: bash
+    install:
+      linux: apt install -y bash
+      darwin: brew install bash
+    files:
+      - path: .bashrc
+        target: home
+      - path: .bash_profile
+        target: home
+
+  - software: zsh
+    install:
+      linux: apt install -y zsh
+      darwin: brew install zsh
+    files:
+      - path: .zshrc
+        target: home
+
+  # Git configuration
+  - software: git
+    install:
+      linux: apt install -y git
+      darwin: brew install git
+      windows: choco install git
+    files:
+      - path: .gitconfig
+        target: home
+      - path: .gitignore_global
+        target: home
+
+  # Modern terminal tools
+  - software: neovim
+    install:
+      linux: apt install -y neovim
+      darwin: brew install neovim
+      windows: choco install neovim
+    files:
+      - path: nvim;
+        target: home/.config
+
+  - software: tmux
+    install:
+      linux: apt install -y tmux
+      darwin: brew install tmux
+    files:
+      - path: .tmux.conf
+        target: home
+
+  # Cross-platform tools (same command for all platforms)
+  - software: starship
+    install:
+      all: curl -sS https://starship.rs/install.sh | sh -s -- -y
+    files:
+      - path: starship.toml
+        target: home/.config
+
+# How it works:
+# 1. When you run sync, the agent will:
+#    - Clone/pull your dotfiles repository
+#    - Parse this configuration file
+#    - Detect your platform (linux, darwin, windows, etc.)
+#    - Install software packages that have commands for your platform
+#    - Copy dotfiles to their target locations
+#
+# 2. Installation behavior:
+#    - Skips packages without commands for your platform
+#    - Continues even if some installations fail
+#    - Logs success/failure for each package
+#    - Does not fail the entire sync if installations fail
+#
+# 3. Platform detection:
+#    - linux: Ubuntu, Debian, Fedora, Arch, etc.
+#    - darwin: macOS
+#    - windows: Windows
+#    - all: Cross-platform commands (like curl scripts)

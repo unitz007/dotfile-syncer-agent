@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "type": "command",
+            "name": "Run",
+            "program": "/usr/local/bin/sdlc",
+            "args": [
+                "run",
+                "-e",
+                "-g=http://localhost:2000/charles/dotfiles.git -p=4000 -d=$USER_HOME$/Personal/Golang/Dotfile-Syncer/DevHome -w=http://localhost:8080/git-hook?stream=git-web-hook -c=$USER_HOME$/Personal/Golang/Dotfile-Syncer/DevHome -b=http://localhost:2000/api/v1"
+            ],
+            "environment": {
+                "GITHUB_TOKEN": "",
+                "HOME": "$USER_HOME$/Personal/Golang/Dotfile-Syncer/DevHome",
+                "SDLC_CONFIG_LOCATION": "$USER_HOME$"
+            },
+            "pty": true
+        }
+    ]
+}

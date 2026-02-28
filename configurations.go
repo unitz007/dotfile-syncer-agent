@@ -1,9 +1,7 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -27,26 +25,29 @@ type Configurations struct {
 // Returns an error if required configuration (like GITHUB_TOKEN) is missing.
 func InitializeConfigurations(
 	dotfilePath string,
-	webHook string,
-	port string,
 	configPath string,
-	gitUrl string,
-	githubApiBaseUrl string) (*Configurations, error) {
+) (*Configurations, error) {
 
-	// GitHub token is required for API access
-	gitToken, ok := os.LookupEnv("GITHUB_TOKEN")
-	if !ok {
-		return nil, errors.New("no GITHUB_TOKEN environment variable found")
-	}
+	// GitHub token is optional (recommended for private repos or higher rate limits)
+	gitToken, _ := os.LookupEnv("GITHUB_TOKEN")
 
 	// Set default dotfile path if not provided
 	if dotfilePath == "" {
-		homeDir, err := os.UserConfigDir()
+		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return nil, fmt.Errorf("unable to access home directory: %v", err.Error())
 		}
 
 		dotfilePath = path.Join(homeDir, "dotfiles")
+	} else if strings.HasPrefix(dotfilePath, "~/") || dotfilePath == "~" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			if dotfilePath == "~" {
+				dotfilePath = homeDir
+			} else {
+				dotfilePath = path.Join(homeDir, dotfilePath[2:])
+			}
+		}
 	}
 
 	// Set up configuration directory
@@ -77,15 +78,6 @@ func InitializeConfigurations(
 		return configPath, nil
 	}()
 
-	// Extract repository name from Git URL
-	repoName, err := getRepoValue(gitUrl, "repository")
-	if err != nil {
-		return nil, err
-	}
-
-	// Extract repository owner from Git URL
-	repoOwner, err := getRepoValue(gitUrl, "repoOwner")
-
 	if err != nil {
 		return nil, err
 	}
@@ -94,71 +86,34 @@ func InitializeConfigurations(
 	// ################## CONFIGURATIONS ##################
 	Infoln("Configuration Path ->", configPath)
 	Infoln("Dotfile Path ->", dotfilePath)
-	Infoln("Git Repository ->", repoName)
-	Infoln("Repository Owner ->", repoOwner)
 	Infoln("Home Path ->", func() string {
 		h, _ := os.UserHomeDir()
 		return h
 	}())
-	Infoln("API Base Url ->", githubApiBaseUrl)
-	Infoln("WebHook ->", webHook)
-	Infoln("Git Url ->", gitUrl)
-	Infoln("Port ->", port)
 	// #################################################
 
 	config := &Configurations{
-		DotfilePath:     dotfilePath,
-		WebHook:         webHook,
-		Port:            port,
-		GithubToken:     gitToken,
-		ConfigPath:      configPath,
-		GitUrl:          gitUrl,
-		GitRepository:   repoName,
-		RepositoryOwner: repoOwner,
-		GitApiBaseUrl:   githubApiBaseUrl,
+		DotfilePath: dotfilePath,
+		GithubToken: gitToken,
+		ConfigPath:  configPath,
 	}
 
 	return config, nil
 
 }
 
-// getRepoValue extracts repository information from a Git URL.
-// filter can be "repository" (returns repo name) or "repoOwner" (returns owner/org name).
-// Expects URLs in format: https://github.com/owner/repository.git
-func getRepoValue(gitUrl string, filter string) (string, error) {
-	parsedURL, err := url.Parse(gitUrl)
-	if err != nil {
-		return "", errors.New("unable to parse git url")
+func ParseGitUrl(gitUrl string) (owner, repo string, err error) {
+	// Basic parsing for https://github.com/owner/repo.git or https://github.com/owner/repo
+	gitUrl = strings.TrimSuffix(gitUrl, "/")
+	gitUrl = strings.TrimSuffix(gitUrl, ".git")
+
+	parts := strings.Split(gitUrl, "/")
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("invalid git url: %s", gitUrl)
 	}
 
-	if !strings.HasSuffix(parsedURL.Path, ".git") {
-		return "", errors.New("not a git url")
-	}
+	repo = parts[len(parts)-1]
+	owner = parts[len(parts)-2]
 
-	// Get the path component of the URL
-	p := strings.Trim(parsedURL.Path, "/") // Remove leading/trailing slashes
-
-	// Split the path into segments
-	segments := strings.Split(p, "/")
-	if len(segments) < 2 {
-		Error("invalid GitHub URL: %s", gitUrl)
-		return "", fmt.Errorf("invalid GitHub URL: %s", gitUrl)
-	}
-
-	repoVal, err := func() (string, error) {
-		switch filter {
-		case "repository":
-			return segments[len(segments)-1], nil
-		case "repoOwner":
-			return segments[len(segments)-2], nil
-		default:
-			return "", fmt.Errorf("invalid filter: %s", filter)
-		}
-	}()
-
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSuffix(repoVal, ".git"), nil
+	return owner, repo, nil
 }

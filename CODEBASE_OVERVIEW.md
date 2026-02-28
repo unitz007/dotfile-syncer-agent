@@ -8,7 +8,6 @@ This document provides a high-level overview of the dotfile agent codebase struc
 - Entry point for the application
 - Sets up HTTP server, SSE server, and background processes
 - Handles command-line flags using Cobra
-- Manages automatic sync polling (every 30 seconds)
 - Listens for webhook events
 
 ### 2. Configuration (`configurations.go`)
@@ -153,8 +152,9 @@ dotfiles:
 ## Environment Variables
 
 - `GITHUB_TOKEN`: Required - GitHub personal access token
-- `DOTFILE_MACHINE_ID`: Optional - Unique machine identifier for broker
 - `DOTFILE_BROKER_URL`: Optional - Broker service URL
+- `DOTFILE_AGENT_TOKEN`: Optional - Long-lived agent token issued by the broker; when set for the first start it is persisted to the local configuration directory so subsequent starts do not require this variable.
+- `DOTFILE_MACHINE_ID`: Optional - Legacy machine identifier for broker, kept only for transitional setups
 
 ## Command-Line Flags
 

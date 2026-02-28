@@ -11,8 +11,7 @@ are always up-to-date and readily available across your machines.
   sync with the remote version.
 * **YAML Configuration:**  A simple yet powerful YAML file dictates how the agent should handle your dotfiles. You can
   specify which files or directories to track, their destination locations, and any special instructions.
-* **Automatic Synchronization:**  The agent can be set up to automatically synchronize your dotfiles upon detecting
-  changes in the Git repository. This ensures that your configurations are always consistent and up-to-date.
+* **Broker-Triggered Synchronization:**  The agent synchronizes dotfiles when instructed by the broker service, ensuring centralized control and coordination.
 * **Manual Synchronization:**  You can also trigger synchronization manually whenever you desire, giving you complete
   control over the process.
 * **Progress Tracking:**  The agent provides detailed progress updates during synchronization, letting you know exactly
@@ -42,9 +41,10 @@ are always up-to-date and readily available across your machines.
   define how your dotfiles should be synchronized.
 
 * **Environment Variables:**  Set the following environment variables:
-    * `GITHUB_TOKEN`:  Your GitHub personal access token (if using GitHub as your Git provider).
-    * `DOTFILE_MACHINE_ID`:  A unique identifier for your machine.
-    * `DOTFILE_BROKER_URL`:  The URL of your broker service (if using broker notifications).
+*    * `GITHUB_TOKEN`:  Your GitHub personal access token (if using GitHub as your Git provider).
+*    * `DOTFILE_BROKER_URL`:  The URL of your broker service (if using broker notifications).
+*    * `DOTFILE_AGENT_TOKEN`:  Optional long-lived agent token issued by the broker; when present on first start it is persisted to the agent configuration directory so subsequent starts do not require this variable.
+*    * `DOTFILE_MACHINE_ID`:  Optional legacy identifier for your machine, used only for transitional broker integrations.
 
 ### Options
 

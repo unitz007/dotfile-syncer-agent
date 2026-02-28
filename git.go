@@ -31,7 +31,9 @@ func (g Git) RemoteCommit() (*Commit, error) {
 
 	gitToken := g.config.GithubToken
 	request.Header.Add("Content-Type", "application/json")
-	request.Header.Add("Authorization", "Bearer "+gitToken)
+	if gitToken != "" {
+		request.Header.Add("Authorization", "Bearer "+gitToken)
+	}
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -41,7 +43,7 @@ func (g Git) RemoteCommit() (*Commit, error) {
 	statusCode := response.StatusCode
 
 	if statusCode != 200 {
-		return nil, fmt.Errorf("unable to fetch remote commit: %v", statusCode)
+		return nil, fmt.Errorf("unable to fetch remote commit from %v: %v", gitUrl, statusCode)
 	}
 
 	var responseBody []GitHttpCommitResponse
@@ -52,6 +54,8 @@ func (g Git) RemoteCommit() (*Commit, error) {
 	}
 
 	headCommit := responseBody[0]
+
+	Infoln("RemoteCommit: fetched SHA:", headCommit.Sha)
 
 	commit := &Commit{
 		Id:   headCommit.Sha,
@@ -120,6 +124,13 @@ func (g Git) CloneOrPullRepository() error {
 		_, err = os.Stat(repoPath) // checks if repo already exists
 		if err != nil {
 			// Repository doesn't exist, clone it
+			Infoln("Repository not found, cloning from:", g.config.GitUrl)
+			if _, err := os.Stat(g.config.DotfilePath); os.IsNotExist(err) {
+				if err := os.MkdirAll(g.config.DotfilePath, 0755); err != nil {
+					return fmt.Errorf("failed to create dotfile path: %w", err)
+				}
+			}
+
 			err = os.Chdir(g.config.DotfilePath)
 			if err != nil {
 				return err
@@ -130,15 +141,22 @@ func (g Git) CloneOrPullRepository() error {
 				return err
 			}
 
+			Infoln("Clone successful")
 			return os.Chdir(g.config.GitRepository)
 		} else {
 			// Repository exists, pull latest changes
+			Infoln("Repository exists, pulling latest changes from:", repoPath)
 			err = os.Chdir(repoPath)
 			if err != nil {
 				return err
 			}
 
-			return exec.Command(git, "pull", "origin", "main").Run()
+			output, err := exec.Command(git, "pull", "origin", "main").CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("git pull failed: %s, output: %s", err, string(output))
+			}
+			Infoln("Pull successful")
+			return nil
 
 		}
 	}()

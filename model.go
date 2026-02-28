@@ -17,7 +17,7 @@ type GitWebHookCommitResponse struct {
 
 // SyncStatusResponse represents the current synchronization status between local and remote repositories
 type SyncStatusResponse struct {
-	IsSync       bool    `json:"is_synced"`      // Whether local and remote are in sync
+	IsSync       bool    `json:"is_sync"`        // Whether local and remote are in sync
 	LastSyncTime string  `json:"last_sync_time"` // Timestamp of last sync operation
 	RemoteCommit *Commit `json:"remote_commit"`  // Latest commit on remote repository
 	LocalCommit  *Commit `json:"local_commit"`   // Latest commit in local repository
@@ -46,15 +46,30 @@ func InitGitTransform(
 	localCommit *Commit,
 	remoteCommit *Commit,
 ) SyncStatusResponse {
+	isSync := false
+	if localCommit != nil && remoteCommit != nil {
+		isSync = localCommit.Id == remoteCommit.Id
+		if !isSync {
+			Infoln("InitGitTransform: Local != Remote:", localCommit.Id, "!=", remoteCommit.Id)
+		} else {
+			Infoln("InitGitTransform: Local == Remote:", localCommit.Id)
+		}
+	} else {
+		localStr := "nil"
+		if localCommit != nil {
+			localStr = localCommit.Id
+		}
+		remoteStr := "nil"
+		if remoteCommit != nil {
+			remoteStr = remoteCommit.Id
+		}
+		Infoln("InitGitTransform: Local or Remote is nil. Local:", localStr, "Remote:", remoteStr)
+	}
+
 	return SyncStatusResponse{
 		LocalCommit:  localCommit,
 		LastSyncTime: time.Now().UTC().Format(time.RFC3339),
 		RemoteCommit: remoteCommit,
-		IsSync: func() bool {
-			if localCommit != nil && remoteCommit != nil {
-				return localCommit.Id == remoteCommit.Id
-			}
-			return false
-		}(),
+		IsSync:       isSync,
 	}
 }

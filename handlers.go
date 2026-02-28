@@ -53,7 +53,7 @@ func (s SyncHandler) Sync(writer http.ResponseWriter, request *http.Request) {
 		d := *s.syncer
 
 		// Execute sync and stream progress events to client
-		d.Sync(ConsoleSyncConsumer, func(event SyncEvent) {
+		d.Sync(func(event SyncEvent) {
 			data := event.Data
 			v, _ := json.Marshal(data)
 			_, _ = fmt.Fprintf(writer, "data: %v\n\n", string(v))

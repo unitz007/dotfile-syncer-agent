@@ -32,7 +32,7 @@ func (w *SseClient) Write(p []byte) (n int, err error) {
 			// Extract branch name from ref (e.g., "refs/heads/main" -> "main")
 			branch := strings.Split(commitRef, "/")[2]
 			if branch == "main" { // only triggers sync on push to main branch
-				w.Syncer.Sync(ConsoleSyncConsumer)
+				w.Syncer.Sync()
 			}
 		}
 	}

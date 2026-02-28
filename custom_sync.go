@@ -275,8 +275,13 @@ func notify(git *Git, brokerNotifier *BrokerNotifier) {
 
 	remoteCommit, err := git.RemoteCommit()
 	if err != nil {
-		Error(err.Error())
-		return
+		Error("RemoteCommit failed:", err.Error())
+	} else {
+		if remoteCommit == nil {
+			Infoln("RemoteCommit returned nil (no error)")
+		} else {
+			Infoln("RemoteCommit success:", remoteCommit.Id)
+		}
 	}
 
 	response := InitGitTransform(localCommit, remoteCommit)
