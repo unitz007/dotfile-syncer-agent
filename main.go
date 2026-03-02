@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -8,53 +12,141 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func main() {
-	var (
-		rootCmd     = cobra.Command{}
-		dotFilePath = rootCmd.Flags().StringP("dotfile-path", "d", "", "path to dotfile directory")
-		configDir   = rootCmd.Flags().StringP("config-dir", "c", "", "path to config directory")
-		_           = rootCmd.Flags().Bool("decommission", false, "remove local agent identity and exit")
+var (
+	dotFilePath string
+	configDir   string
 
-		// Onboarding flags
-		machineName = rootCmd.Flags().String("machine-name", "", "machine name for broker registration")
-		agentToken  = rootCmd.Flags().String("agent-token", "", "agent token for broker authentication")
-		agentID     = rootCmd.Flags().String("agent-id", "", "unique agent identifier")
-		brokerURL   = rootCmd.Flags().String("broker-url", "", "broker service URL")
-	)
+	// Registration flags
+	regMachineName string
+	regAgentToken  string
+	regBrokerURL   string
+)
+
+func main() {
+	var rootCmd = &cobra.Command{
+		Use:   "dotsync-agent",
+		Short: "Dotfile Syncer Agent",
+	}
+
+	rootCmd.PersistentFlags().StringVarP(&dotFilePath, "dotfile-path", "d", "", "path to dotfile directory")
+	rootCmd.PersistentFlags().StringVarP(&configDir, "config-dir", "c", "", "path to config directory")
+
+	var registerCmd = &cobra.Command{
+		Use:   "register",
+		Short: "Register the agent with a broker",
+		Run: func(cmd *cobra.Command, args []string) {
+			if regBrokerURL == "" || regAgentToken == "" || regMachineName == "" {
+				Error("Broker URL, Token, and Machine Name are required")
+				os.Exit(1)
+			}
+
+			config, err := InitializeConfigurations(dotFilePath, configDir)
+			if err != nil {
+				Error(err.Error())
+				os.Exit(1)
+			}
+
+			err = registerAgent(config, regBrokerURL, regAgentToken, regMachineName)
+			if err != nil {
+				Error("Registration failed: " + err.Error())
+				os.Exit(1)
+			}
+			Infoln("Agent registered successfully!")
+		},
+	}
+	registerCmd.Flags().StringVar(&regBrokerURL, "broker-url", "", "Broker URL")
+	registerCmd.Flags().StringVar(&regAgentToken, "token", "", "Registration Token")
+	registerCmd.Flags().StringVar(&regMachineName, "name", "", "Machine Name")
+
+	var syncCmd = &cobra.Command{
+		Use:   "sync",
+		Short: "Perform a synchronization",
+		Run: func(cmd *cobra.Command, args []string) {
+			runSync(false)
+		},
+	}
+
+	var daemonCmd = &cobra.Command{
+		Use:   "daemon",
+		Short: "Run in daemon mode",
+		Run: func(cmd *cobra.Command, args []string) {
+			runSync(true)
+		},
+	}
+
+	rootCmd.AddCommand(registerCmd, syncCmd, daemonCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		Error(err.Error())
-		return
+		os.Exit(1)
+	}
+}
+
+func registerAgent(config *Configurations, brokerURL, token, name string) error {
+	payload := map[string]string{
+		"token": token,
+		"name":  name,
+	}
+	body, _ := json.Marshal(payload)
+
+	resp, err := http.Post(brokerURL+"/agent/register", "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("server returned status: %d", resp.StatusCode)
 	}
 
-	//config, err := InitializeConfigurations(*dotFilePath, *webhookUrl, *port, *configDir, *gitUrl, *gitApiBaseUrl)
-	config, err := InitializeConfigurations(*dotFilePath, *configDir)
+	var result struct {
+		AgentID    string `json:"agent_id"`
+		AgentToken string `json:"agent_token"`
+		UserID     string `json:"user_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+
+	identity := &AgentIdentity{
+		AgentToken:  result.AgentToken,
+		AgentID:     result.AgentID,
+		MachineName: name,
+		BrokerURL:   brokerURL,
+	}
+
+	return saveAgentIdentity(config, identity)
+}
+
+func runSync(daemon bool) {
+	config, err := InitializeConfigurations(dotFilePath, configDir)
 	if err != nil {
 		Error(err.Error())
-		return
+		os.Exit(1)
 	}
 
-	if rootCmd.Flags().Changed("decommission") {
-		err := removeAgentIdentity(config)
-		if err != nil {
-			Error("Failed to remove local agent identity: " + err.Error())
-			return
-		}
-		Infoln("Local agent identity removed. Exiting.")
-		return
+	identity, err := loadAgentIdentity(config)
+	if err != nil {
+		Error("Failed to load agent identity. Please run 'register' first.")
+		os.Exit(1)
+	}
+	if identity == nil {
+		Error("Agent identity not found. Please run 'register' first.")
+		os.Exit(1)
 	}
 
 	git := &Git{config}
-	brokerNotifier := NewBrokerNotifier(git, *agentID, *agentToken, *machineName, *brokerURL)
+	brokerNotifier := NewBrokerNotifier(git, identity.AgentID, identity.AgentToken, identity.MachineName, identity.BrokerURL)
 	mutex := &sync.Mutex{}
 	syncer := NewEnhancedSyncer(config, brokerNotifier, mutex, git)
 
+	// Configure Git Repo from Broker
 	repoURL, err := brokerNotifier.GetRepositoryConfig()
 	if err != nil {
 		Infoln("WARN: Failed to fetch repository config: " + err.Error())
 	} else {
 		config.GitUrl = repoURL
-		config.GitApiBaseUrl = "https://api.github.com" // Default to public GitHub
+		config.GitApiBaseUrl = "https://api.github.com"
 
 		owner, repo, err := ParseGitUrl(repoURL)
 		if err != nil {
@@ -68,116 +160,66 @@ func main() {
 		err = git.CloneOrPullRepository()
 		if err != nil {
 			Error("Failed to clone/pull repository: " + err.Error())
-			// We continue, as maybe the repo is already there or we can sync later?
-			// But if it failed, syncing won't work well.
-			// However, original request implies we should clone if missing.
 		}
 	}
 
 	brokerNotifier.RegisterStream()
 	runBootstrapSelfTest(brokerNotifier, config)
 
-	// Perform initial sync to update status
-	Infoln("Starting initial sync...")
+	// Initial Sync
+	Infoln("Starting sync...")
 	syncer.Sync()
-	Infoln("Initial sync completed")
+	Infoln("Sync completed")
 
+	if !daemon {
+		return
+	}
+
+	// Daemon Loop
+	ticker := time.NewTicker(10 * time.Second)
+
+	// Start other background services
+	planExecutor := NewPlanExecutor(config, brokerNotifier, git)
+
+	// 1. Policy Executor
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		policyTicker := time.NewTicker(15 * time.Second)
 		for {
 			select {
-			case <-ticker.C:
-				hasCommand, err := brokerNotifier.HasPrioritySyncCommand()
-				if err != nil {
-					Error(err.Error())
-					continue
-				}
-				if !hasCommand {
-					continue
-				}
-				Infoln("Triggering Priority Sync")
-				syncer.Sync()
-				err = brokerNotifier.AckPrioritySyncCommand()
-				if err != nil {
-					Error(err.Error())
-				}
-			}
-		}
-	}()
-
-	go func() {
-		ticker := time.NewTicker(15 * time.Second)
-		for {
-			select {
-			case <-ticker.C:
+			case <-policyTicker.C:
 				cmd, err := brokerNotifier.NextPolicyRunCommand()
 				if err != nil {
-					Error(err.Error())
+					Error("Error checking for policy run: " + err.Error())
 					continue
 				}
 				if cmd == nil {
 					continue
 				}
 
-				result := struct {
-					Policies []struct {
-						PolicyID string   `json:"policy_id"`
-						Mode     string   `json:"mode"`
-						Paths    []string `json:"paths"`
-						Actions  []struct {
-							Path   string `json:"path"`
-							Action string `json:"action"`
-							Detail string `json:"detail,omitempty"`
-						} `json:"actions"`
-					} `json:"policies"`
-					Summary string `json:"summary"`
-				}{}
+				Infoln("Received Policy Run Command:", cmd.RunID)
 
-				for _, p := range cmd.Policies {
-					policyResult := struct {
-						PolicyID string   `json:"policy_id"`
-						Mode     string   `json:"mode"`
-						Paths    []string `json:"paths"`
-						Actions  []struct {
-							Path   string `json:"path"`
-							Action string `json:"action"`
-							Detail string `json:"detail,omitempty"`
-						} `json:"actions"`
-					}{
-						PolicyID: p.Id,
-						Mode:     p.Mode,
-						Paths:    p.Paths,
-					}
-
-					for _, path := range p.Paths {
-						policyResult.Actions = append(policyResult.Actions, struct {
-							Path   string `json:"path"`
-							Action string `json:"action"`
-							Detail string `json:"detail,omitempty"`
-						}{
-							Path:   path,
-							Action: "no_change",
-						})
-					}
-
-					result.Policies = append(result.Policies, policyResult)
+				if cmd.ExecutionPlan == nil {
+					Infoln("Warning: Policy run has no execution plan. Skipping.")
+					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "succeeded", map[string]string{"message": "No execution plan provided"})
+					continue
 				}
 
-				result.Summary = "dry_run_completed"
-
-				err = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "succeeded", result)
+				err = planExecutor.Execute(cmd.RunID, cmd.ExecutionPlan)
 				if err != nil {
-					Error(err.Error())
+					Error("Policy Execution Failed: " + err.Error())
+				} else {
+					Infoln("Policy Execution Completed Successfully")
 				}
 			}
 		}
 	}()
 
+	// 2. Connectivity Check
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		connTicker := time.NewTicker(10 * time.Second)
 		for {
 			select {
-			case <-ticker.C:
+			case <-connTicker.C:
 				hasConnectivity, err := brokerNotifier.HasConnectivityCommand()
 				if err != nil {
 					Error(err.Error())
@@ -198,24 +240,38 @@ func main() {
 		}
 	}()
 
-	// Heartbeat loop
+	// 3. Heartbeat
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		// Initial ping
+		hbTicker := time.NewTicker(30 * time.Second)
 		_ = brokerNotifier.Ping()
 		for {
 			select {
-			case <-ticker.C:
-				err := brokerNotifier.Ping()
-				if err != nil {
-					// Log error but don't crash
-					// fmt.Println("Heartbeat failed:", err)
-				}
+			case <-hbTicker.C:
+				_ = brokerNotifier.Ping()
 			}
 		}
 	}()
 
-	select {}
+	// Main Loop: Priority Sync
+	for {
+		select {
+		case <-ticker.C:
+			hasCommand, err := brokerNotifier.HasPrioritySyncCommand()
+			if err != nil {
+				Error(err.Error())
+				continue
+			}
+			if !hasCommand {
+				continue
+			}
+			Infoln("Triggering Priority Sync")
+			syncer.Sync()
+			err = brokerNotifier.AckPrioritySyncCommand()
+			if err != nil {
+				Error("Failed to ack priority sync: " + err.Error())
+			}
+		}
+	}
 }
 
 func runBootstrapSelfTest(b *BrokerNotifier, c *Configurations) {

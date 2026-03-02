@@ -22,20 +22,29 @@ type BrokerNotifier struct {
 
 // SyncStatus represents the synchronization state sent to the broker
 type SyncStatus struct {
-	LocalCommit  string `json:"local_commit"`  // Local repository commit SHA
-	RemoteCommit string `json:"remote_commit"` // Remote repository commit SHA
-	IsSync       bool   `json:"is_sync"`       // Whether local and remote are synchronized
+	LocalCommit      string `json:"local_commit"`
+	LocalCommitTime  string `json:"local_commit_time"`
+	RemoteCommit     string `json:"remote_commit"`
+	RemoteCommitTime string `json:"remote_commit_time"`
+	LastSyncTime     string `json:"last_sync_time"`
+	IsSync           bool   `json:"is_sync"`
+	Error            string `json:"error,omitempty"`
 }
 
 // Machine represents a machine registered with the broker service
 type Machine struct {
-	Id         string     `json:"_id"`            // Unique machine identifier
-	Name       string     `json:"name,omitempty"` // Human-readable machine name
-	Platform   string     `json:"platform"`       // OS Platform (linux, darwin)
-	Distro     string     `json:"distro"`         // Distribution (ubuntu, fedora, macos)
-	Version    string     `json:"version"`        // OS Version
-	Manager    string     `json:"manager"`        // Package Manager (apt, dnf, brew)
-	SyncStatus SyncStatus `json:"sync_details"`   // Current sync status of the machine
+	Id           string     `json:"_id"`            // Unique machine identifier
+	Name         string     `json:"name,omitempty"` // Human-readable machine name
+	Platform     string     `json:"platform"`       // OS Platform (linux, darwin)
+	Distro       string     `json:"distro"`         // Distribution (ubuntu, fedora, macos)
+	Version      string     `json:"version"`        // OS Version
+	Manager      string     `json:"manager"`        // Package Manager (apt, dnf, brew)
+	Hostname     string     `json:"hostname"`       // Hostname
+	Arch         string     `json:"arch"`           // CPU Architecture
+	AgentVersion string     `json:"agent_version"`  // Agent Version
+	Uptime       int64      `json:"uptime"`         // Uptime in seconds
+	IP           string     `json:"ip"`             // IP Address
+	SyncStatus   SyncStatus `json:"sync_details"`   // Current sync status of the machine
 }
 
 type AgentIdentity struct {
@@ -53,8 +62,9 @@ type PolicyRunCommandPolicy struct {
 }
 
 type PolicyRunCommand struct {
-	RunID    string                   `json:"run_id"`
-	Policies []PolicyRunCommandPolicy `json:"policies"`
+	RunID         string                   `json:"run_id"`
+	Policies      []PolicyRunCommandPolicy `json:"policies"`
+	ExecutionPlan *ExecutionPlan           `json:"execution_plan"`
 }
 
 func loadAgentIdentity(config *Configurations) (*AgentIdentity, error) {
@@ -307,12 +317,17 @@ func (b BrokerNotifier) RegisterStream() {
 			osInfo := GetOSInfo()
 
 			machine := Machine{
-				Id:       b.machine,
-				Name:     b.machineName,
-				Platform: osInfo.Platform,
-				Distro:   osInfo.Distro,
-				Version:  osInfo.Version,
-				Manager:  osInfo.Manager,
+				Id:           b.machine,
+				Name:         b.machineName,
+				Platform:     osInfo.Platform,
+				Distro:       osInfo.Distro,
+				Version:      osInfo.Version,
+				Manager:      osInfo.Manager,
+				Hostname:     osInfo.Hostname,
+				Arch:         osInfo.Arch,
+				AgentVersion: osInfo.AgentVersion,
+				Uptime:       osInfo.Uptime,
+				IP:           osInfo.IP,
 				SyncStatus: SyncStatus{
 					LocalCommit: localCommit.Id,
 				},
@@ -509,9 +524,10 @@ func (b BrokerNotifier) NextPolicyRunCommand() (*PolicyRunCommand, error) {
 	}
 
 	var payload struct {
-		HasRun   bool                     `json:"has_run"`
-		RunID    string                   `json:"run_id"`
-		Policies []PolicyRunCommandPolicy `json:"policies"`
+		HasRun        bool                     `json:"has_run"`
+		RunID         string                   `json:"run_id"`
+		Policies      []PolicyRunCommandPolicy `json:"policies"`
+		ExecutionPlan *ExecutionPlan           `json:"execution_plan"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
@@ -520,9 +536,16 @@ func (b BrokerNotifier) NextPolicyRunCommand() (*PolicyRunCommand, error) {
 		return nil, nil
 	}
 
+	if payload.ExecutionPlan != nil {
+		if err := payload.ExecutionPlan.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid execution plan received: %v", err)
+		}
+	}
+
 	return &PolicyRunCommand{
-		RunID:    payload.RunID,
-		Policies: payload.Policies,
+		RunID:         payload.RunID,
+		Policies:      payload.Policies,
+		ExecutionPlan: payload.ExecutionPlan,
 	}, nil
 }
 

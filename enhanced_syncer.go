@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path"
 	"sync"
+	"time"
 )
 
 type enhancedSync struct {
@@ -34,7 +35,14 @@ func (e enhancedSync) Sync(consumers ...Consumer) {
 	e.mutex.Lock()
 	ch := make(chan SyncEvent)
 
-	notify(&Git{e.config}, e.brokerNotifier)
+	// Notify start of sync (IsSync=true)
+	go func() {
+		status := SyncStatus{
+			IsSync:       true,
+			LastSyncTime: "", // Empty indicates start
+		}
+		e.brokerNotifier.SyncStatus(status)
+	}()
 
 	go func() {
 		steps := enhancedSyncSteps(e.git)
@@ -81,14 +89,57 @@ func (e enhancedSync) Sync(consumers ...Consumer) {
 		e.brokerNotifier.SyncEvent(event)
 	})
 
+	var lastError string
 	for event := range ch {
+		// Capture error if any
+		if event.Data.Error != "" {
+			lastError = event.Data.Error
+		}
 		for _, consumer := range consumers {
 			consumer(event)
 		}
 	}
 
-	notify(&Git{e.config}, e.brokerNotifier)
+	// Final notification with error status if applicable
+	notifyStatus(&Git{e.config}, e.brokerNotifier, lastError)
 	e.mutex.Unlock()
+}
+
+func notifyStatus(git *Git, notifier *BrokerNotifier, lastError string) {
+	localCommit, _ := git.LocalCommit()
+	remoteCommit, _ := git.RemoteCommit()
+
+	// Handle case where commit might be nil/empty (e.g. fresh repo)
+	localDate := ""
+	if localCommit != nil {
+		localDate = localCommit.Time
+	}
+
+	remoteDate := ""
+	if remoteCommit != nil {
+		remoteDate = remoteCommit.Time
+	}
+
+	localId := ""
+	if localCommit != nil {
+		localId = localCommit.Id
+	}
+
+	remoteId := ""
+	if remoteCommit != nil {
+		remoteId = remoteCommit.Id
+	}
+
+	status := SyncStatus{
+		LocalCommit:      localId,
+		LocalCommitTime:  localDate,
+		RemoteCommit:     remoteId,
+		RemoteCommitTime: remoteDate,
+		LastSyncTime:     time.Now().Format(time.RFC3339), // Use current time for sync timestamp
+		IsSync:           false,                           // Final status is not "syncing" (which implies in-progress)
+		Error:            lastError,
+	}
+	notifier.SyncStatus(status)
 }
 
 func enhancedSyncSteps(git *Git) []struct {

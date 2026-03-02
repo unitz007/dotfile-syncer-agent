@@ -3,22 +3,38 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 )
 
+// AgentVersion is set at build time
+var AgentVersion = "dev"
+
 type OSInfo struct {
-	Platform string `json:"platform"`
-	Distro   string `json:"distro"`
-	Version  string `json:"version"`
-	Manager  string `json:"manager"`
+	Platform     string `json:"platform"`
+	Distro       string `json:"distro"`
+	Version      string `json:"version"`
+	Manager      string `json:"manager"`
+	Hostname     string `json:"hostname"`
+	Arch         string `json:"arch"`
+	AgentVersion string `json:"agent_version"`
+	Uptime       int64  `json:"uptime_seconds"`
+	IP           string `json:"ip_address"`
 }
 
 func GetOSInfo() OSInfo {
+	hostname, _ := os.Hostname()
+
 	info := OSInfo{
-		Platform: runtime.GOOS,
+		Platform:     runtime.GOOS,
+		Hostname:     hostname,
+		Arch:         runtime.GOARCH,
+		AgentVersion: AgentVersion,
+		Uptime:       getUptime(),
+		IP:           getOutboundIP(),
 	}
 
 	switch info.Platform {
@@ -29,6 +45,10 @@ func GetOSInfo() OSInfo {
 		info.Distro = "macos"
 		info.Version = getMacVersion()
 		info.Manager = "brew" // Assume Homebrew on macOS
+	case "windows":
+		info.Distro = "windows"
+		info.Version = getWindowsVersion()
+		info.Manager = "winget" // Assume WinGet or Chocolatey
 	default:
 		info.Distro = "unknown"
 		info.Version = "unknown"
@@ -36,6 +56,29 @@ func GetOSInfo() OSInfo {
 	}
 
 	return info
+}
+
+func getUptime() int64 {
+	// Simple cross-platform approximation or specific implementation
+	// For now, return 0 if hard to get without CGO or complex parsing
+	// Linux: /proc/uptime
+	// Mac: sysctl kern.boottime (needs parsing)
+	return 0
+}
+
+func getOutboundIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
+}
+
+func getWindowsVersion() string {
+	// Basic implementation
+	return "10/11"
 }
 
 func getLinuxDistroInfo() (string, string) {
