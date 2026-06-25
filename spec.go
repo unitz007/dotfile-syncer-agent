@@ -123,6 +123,79 @@ func LoadSpecFromRepo(repoPath string) (*SyncPolicySpec, error) {
 	return &spec, nil
 }
 
+// MergeSpecs merges two specs with the following rules:
+//   - Scalar fields (repository, branch, strategy, mode): override wins when set.
+//   - Files: union of both lists; when the same target appears in both, override wins.
+//   - Packages: union of both lists per OS; (manager, name) duplicates are deduplicated.
+//
+// base is typically the repo .dotsync.yaml; override is the broker spec.
+func MergeSpecs(base, override *SyncPolicySpec) *SyncPolicySpec {
+	if base == nil {
+		return override
+	}
+	if override == nil {
+		return base
+	}
+
+	merged := &SyncPolicySpec{
+		APIVersion: "dotsync/v1",
+		Kind:       "SyncPolicy",
+		Metadata:   SpecMetadata{Name: base.Metadata.Name},
+	}
+
+	// Scalars: override wins when non-empty.
+	merged.Spec.Repository = base.Spec.Repository
+	if override.Spec.Repository != "" {
+		merged.Spec.Repository = override.Spec.Repository
+	}
+	merged.Spec.Branch = base.Spec.Branch
+	if override.Spec.Branch != "" {
+		merged.Spec.Branch = override.Spec.Branch
+	}
+	merged.Spec.Strategy = base.Spec.Strategy
+	if override.Spec.Strategy != "" {
+		merged.Spec.Strategy = override.Spec.Strategy
+	}
+	merged.Spec.Mode = base.Spec.Mode
+	if override.Spec.Mode != "" {
+		merged.Spec.Mode = override.Spec.Mode
+	}
+
+	// Files: start with base, override wins on same target.
+	filesByTarget := make(map[string]SpecFileMapping)
+	for _, f := range base.Spec.Files {
+		filesByTarget[f.Target] = f
+	}
+	for _, f := range override.Spec.Files {
+		filesByTarget[f.Target] = f // override wins
+	}
+	for _, f := range filesByTarget {
+		merged.Spec.Files = append(merged.Spec.Files, f)
+	}
+
+	// Packages: union per OS, deduplicate by (manager, name).
+	merged.Spec.Packages = make(map[string][]SpecPackage)
+	allOS := make(map[string]bool)
+	for osKey := range base.Spec.Packages {
+		allOS[osKey] = true
+	}
+	for osKey := range override.Spec.Packages {
+		allOS[osKey] = true
+	}
+	for osKey := range allOS {
+		seen := make(map[string]bool)
+		for _, pkg := range append(base.Spec.Packages[osKey], override.Spec.Packages[osKey]...) {
+			key := pkg.Manager + "/" + pkg.Name
+			if !seen[key] {
+				seen[key] = true
+				merged.Spec.Packages[osKey] = append(merged.Spec.Packages[osKey], pkg)
+			}
+		}
+	}
+
+	return merged
+}
+
 // ToExecutionPlan converts the spec into an ExecutionPlan for the given platform
 // (e.g. "darwin", "linux").  Package resolution is performed on the agent side.
 func (s *SyncPolicySpec) ToExecutionPlan(platform string) *ExecutionPlan {

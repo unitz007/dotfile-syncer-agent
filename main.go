@@ -212,19 +212,10 @@ func runSync(daemon bool) {
 					continue
 				}
 
-				// Hard-fail: spec present in both sources is ambiguous.
-				if repoSpec != nil && cmd.Spec != nil {
-					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "failed", map[string]string{
-						"error": "conflict: SyncPolicy spec found in both .dotsync.yaml and broker policy run; cannot apply ambiguous spec",
-					})
-					continue
-				}
-
-				// Pick whichever source provided a spec.
-				spec := cmd.Spec
-				if repoSpec != nil {
-					spec = repoSpec
-				}
+				// Merge: repo file is the base, broker spec overrides scalars and
+				// wins on file-target conflicts. If only one source exists it is used
+				// as-is. MergeSpecs handles all nil combinations.
+				spec := MergeSpecs(repoSpec, cmd.Spec)
 
 				if spec == nil {
 					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "succeeded", map[string]string{"message": "no spec provided"})
