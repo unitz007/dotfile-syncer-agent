@@ -131,9 +131,18 @@ func (e *PlanExecutor) executeInstall(runID string, commands []string) ([]string
 		if !allowedInstallPattern.MatchString(trimmed) {
 			return installed, fmt.Errorf("install command rejected (not in allowlist): %q", trimmed)
 		}
+
+		// parts: [manager, "install", pkg]
+		parts := strings.Fields(trimmed)
+		manager, pkg := parts[0], parts[2]
+
+		if isPackageInstalled(manager, pkg) {
+			Infoln(fmt.Sprintf("already installed, skipping: %s", pkg))
+			continue
+		}
+
 		e.reportStatus(runID, "running", fmt.Sprintf("Executing: %s", trimmed))
 
-		parts := strings.Fields(trimmed)
 		cmd := exec.Command(parts[0], parts[1:]...) // #nosec G204 — validated above
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -144,6 +153,30 @@ func (e *PlanExecutor) executeInstall(runID string, commands []string) ([]string
 		installed = append(installed, trimmed)
 	}
 	return installed, nil
+}
+
+// isPackageInstalled queries the package manager to check whether a package is
+// already present on the system.  Returns true if the package is installed so
+// the caller can skip the install step.
+func isPackageInstalled(manager, pkg string) bool {
+	var cmd *exec.Cmd
+	switch manager {
+	case "brew":
+		cmd = exec.Command("brew", "list", pkg)
+	case "apt", "apt-get":
+		cmd = exec.Command("dpkg", "-s", pkg)
+	case "dnf", "yum":
+		cmd = exec.Command("rpm", "-q", pkg)
+	case "pacman":
+		cmd = exec.Command("pacman", "-Q", pkg)
+	case "apk":
+		cmd = exec.Command("apk", "info", "-e", pkg)
+	default:
+		return false
+	}
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	return cmd.Run() == nil
 }
 
 // executeFileSyncFlat handles file syncing for legacy flat execution plans.
