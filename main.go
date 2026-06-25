@@ -64,17 +64,23 @@ func main() {
 		Use:   "sync",
 		Short: "Perform a synchronization",
 		Run: func(cmd *cobra.Command, args []string) {
-			runSync(false)
+			runSync(false, 0, "", "main")
 		},
 	}
 
+	var webhookPort int
+	var webhookSecret string
+	var webhookBranch string
 	var daemonCmd = &cobra.Command{
 		Use:   "daemon",
 		Short: "Run in daemon mode",
 		Run: func(cmd *cobra.Command, args []string) {
-			runSync(true)
+			runSync(true, webhookPort, webhookSecret, webhookBranch)
 		},
 	}
+	daemonCmd.Flags().IntVar(&webhookPort, "webhook-port", 0, "Port to listen for GitHub push webhooks (0 = disabled)")
+	daemonCmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "HMAC secret for validating webhook payloads")
+	daemonCmd.Flags().StringVar(&webhookBranch, "webhook-branch", "main", "Branch to watch for push events")
 
 	// apply subcommand
 	var applyFile string
@@ -284,7 +290,7 @@ func registerAgent(config *Configurations, brokerURL, token, name string) error 
 	return saveAgentIdentity(config, identity)
 }
 
-func runSync(daemon bool) {
+func runSync(daemon bool, webhookPort int, webhookSecret, webhookBranch string) {
 	config, err := InitializeConfigurations(dotFilePath, configDir)
 	if err != nil {
 		Error(err.Error())
@@ -438,35 +444,46 @@ func runSync(daemon bool) {
 			prioritySync()
 		}
 	} else {
-		// ── Standalone daemon: pull + apply spec every 5 minutes ──────────────
-		Infoln("Standalone daemon started — syncing every 5 minutes")
-		for range time.NewTicker(5 * time.Minute).C {
-			Infoln("Periodic sync...")
+		// ── Standalone daemon ─────────────────────────────────────────────────
+		standaloneSync := func() {
 			if config.GitUrl != "" {
 				if err := git.CloneOrPullRepository(); err != nil {
 					Error("git pull failed: " + err.Error())
-					continue
+					return
 				}
 			}
 			repoPath := filepath.Join(config.DotfilePath, config.GitRepository)
 			spec, err := LoadSpecFromRepo(repoPath)
 			if err != nil {
 				Error("could not read .dotsync.yaml: " + err.Error())
-				continue
+				return
 			}
 			if spec == nil {
 				Warnln("no .dotsync.yaml found in repo — nothing to apply")
-				continue
+				return
 			}
 			if err := spec.Validate(); err != nil {
 				Error("spec validation failed: " + err.Error())
-				continue
+				return
 			}
 			if _, err := planExecutor.Execute("standalone", spec.ToExecutionPlan(runtime.GOOS)); err != nil {
 				Error("sync failed: " + err.Error())
 			} else {
 				Successln("Sync completed 🔄")
 			}
+		}
+
+		// Webhook listener — triggers sync immediately on push.
+		if webhookPort > 0 {
+			go startWebhookServer(webhookPort, webhookSecret, webhookBranch, standaloneSync)
+			Infoln(fmt.Sprintf("Webhook active — add this URL to your GitHub repo: http://<host>:%d/webhook", webhookPort))
+		}
+
+		// Periodic fallback — runs even when webhook is active.
+		Infoln("Standalone daemon started — periodic sync every 5 minutes as fallback")
+		for range time.NewTicker(5 * time.Minute).C {
+			Infoln("Periodic sync...")
+			standaloneSync()
 		}
 	}
 }
