@@ -128,18 +128,21 @@ Examples:
 
 			// Print what will be applied
 			Infoln("--- Execution Plan ---")
-			if len(plan.Install) == 0 {
-				Infoln("  packages: none for", runtime.GOOS)
+			if len(plan.SoftwareUnits) == 0 {
+				Infoln("  no software units for", runtime.GOOS)
 			} else {
-				for _, cmd := range plan.Install {
-					Infoln("  install:", cmd)
-				}
-			}
-			if len(plan.Files) == 0 {
-				Infoln("  files: none")
-			} else {
-				for _, f := range plan.Files {
-					Infoln("  file:", f.Source, "->", f.Target)
+				for _, unit := range plan.SoftwareUnits {
+					Infoln(fmt.Sprintf("  [%s]", unit.Name))
+					if len(unit.Install) == 0 {
+						Infoln("    packages: none for", runtime.GOOS)
+					} else {
+						for _, cmd := range unit.Install {
+							Infoln("    install:", cmd)
+						}
+					}
+					for _, f := range unit.Files {
+						Infoln("    config:", f.Source, "->", f.Target)
+					}
 				}
 			}
 			Infoln("  strategy:", plan.SyncStrategy)
