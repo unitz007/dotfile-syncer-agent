@@ -64,23 +64,17 @@ func main() {
 		Use:   "sync",
 		Short: "Perform a synchronization",
 		Run: func(cmd *cobra.Command, args []string) {
-			runSync(false, 0, "", "main")
+			runSync(false)
 		},
 	}
 
-	var webhookPort int
-	var webhookSecret string
-	var webhookBranch string
 	var daemonCmd = &cobra.Command{
 		Use:   "daemon",
 		Short: "Run in daemon mode",
 		Run: func(cmd *cobra.Command, args []string) {
-			runSync(true, webhookPort, webhookSecret, webhookBranch)
+			runSync(true)
 		},
 	}
-	daemonCmd.Flags().IntVar(&webhookPort, "webhook-port", 0, "Port to listen for GitHub push webhooks (0 = disabled)")
-	daemonCmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "HMAC secret for validating webhook payloads")
-	daemonCmd.Flags().StringVar(&webhookBranch, "webhook-branch", "main", "Branch to watch for push events")
 
 	// apply subcommand
 	var applyFile string
@@ -290,7 +284,7 @@ func registerAgent(config *Configurations, brokerURL, token, name string) error 
 	return saveAgentIdentity(config, identity)
 }
 
-func runSync(daemon bool, webhookPort int, webhookSecret, webhookBranch string) {
+func runSync(daemon bool) {
 	config, err := InitializeConfigurations(dotFilePath, configDir)
 	if err != nil {
 		Error(err.Error())
@@ -444,13 +438,14 @@ func runSync(daemon bool, webhookPort int, webhookSecret, webhookBranch string) 
 			prioritySync()
 		}
 	} else {
-		// ── Standalone daemon ─────────────────────────────────────────────────
-		standaloneSync := func() {
-			if config.GitUrl != "" {
-				if err := git.CloneOrPullRepository(); err != nil {
-					Error("git pull failed: " + err.Error())
-					return
-				}
+		// ── Standalone daemon: poll GitHub API for new commits ─────────────────
+		// The agent calls out to GitHub — no inbound port, works behind NAT.
+		Infoln("Standalone daemon started — polling GitHub for changes every 30s")
+
+		applySpec := func() {
+			if err := git.CloneOrPullRepository(); err != nil {
+				Error("git pull failed: " + err.Error())
+				return
 			}
 			repoPath := filepath.Join(config.DotfilePath, config.GitRepository)
 			spec, err := LoadSpecFromRepo(repoPath)
@@ -459,7 +454,7 @@ func runSync(daemon bool, webhookPort int, webhookSecret, webhookBranch string) 
 				return
 			}
 			if spec == nil {
-				Warnln("no .dotsync.yaml found in repo — nothing to apply")
+				Warnln("no .dotsync.yaml in repo — nothing to apply")
 				return
 			}
 			if err := spec.Validate(); err != nil {
@@ -473,17 +468,27 @@ func runSync(daemon bool, webhookPort int, webhookSecret, webhookBranch string) 
 			}
 		}
 
-		// Webhook listener — triggers sync immediately on push.
-		if webhookPort > 0 {
-			go startWebhookServer(webhookPort, webhookSecret, webhookBranch, standaloneSync)
-			Infoln(fmt.Sprintf("Webhook active — add this URL to your GitHub repo: http://<host>:%d/webhook", webhookPort))
+		// Seed the last-known SHA from the current remote so we don't re-apply on startup.
+		var lastSHA string
+		if remote, err := git.RemoteCommit(); err == nil {
+			lastSHA = remote.Id
 		}
 
-		// Periodic fallback — runs even when webhook is active.
-		Infoln("Standalone daemon started — periodic sync every 5 minutes as fallback")
-		for range time.NewTicker(5 * time.Minute).C {
-			Infoln("Periodic sync...")
-			standaloneSync()
+		for range time.NewTicker(30 * time.Second).C {
+			if config.GitUrl == "" || config.RepositoryOwner == "" {
+				continue
+			}
+			remote, err := git.RemoteCommit()
+			if err != nil {
+				Warnln("could not reach GitHub: " + err.Error())
+				continue
+			}
+			if remote.Id == lastSHA {
+				continue // nothing new
+			}
+			Infoln("New commit detected:", remote.Id[:7], "— syncing ⚡")
+			lastSHA = remote.Id
+			applySpec()
 		}
 	}
 }
