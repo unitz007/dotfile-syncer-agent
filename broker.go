@@ -55,6 +55,7 @@ type AgentIdentity struct {
 	AgentID     string `json:"agent_id"`
 	MachineName string `json:"machine_name"`
 	BrokerURL   string `json:"broker_url"`
+	GithubToken string `json:"github_token,omitempty"`
 }
 
 type PolicyRunCommandPolicy struct {
@@ -124,42 +125,6 @@ func removeAgentIdentity(config *Configurations) error {
 		return err
 	}
 	return nil
-}
-
-// FetchGitHubToken retrieves the GitHub OAuth token the broker holds for the
-// user that owns this agent.  Returns ("", nil) if the user has not connected
-// their GitHub account yet.
-func (b BrokerNotifier) FetchGitHubToken() (string, error) {
-	if b.brokerUrl == "" || b.agentToken == "" {
-		return "", nil
-	}
-
-	req, err := http.NewRequest(http.MethodGet, b.brokerUrl+"/agent/github-token", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Agent "+b.agentToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return "", nil // GitHub not connected yet
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status %d fetching GitHub token", resp.StatusCode)
-	}
-
-	var payload struct {
-		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", err
-	}
-	return payload.Token, nil
 }
 
 func (b BrokerNotifier) GetRepositoryConfig() (string, error) {

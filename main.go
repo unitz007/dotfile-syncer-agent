@@ -194,7 +194,53 @@ Examples:
 	applyCmd.Flags().StringVarP(&applyFile, "file", "f", "", "path to spec file (default: .dotsync.yaml in current directory)")
 	applyCmd.Flags().BoolVar(&applyDryRun, "dry-run", false, "validate and print execution plan without applying")
 
-	rootCmd.AddCommand(registerCmd, syncCmd, daemonCmd, applyCmd)
+	// github connect subcommand
+	var githubToken string
+	var githubCmd = &cobra.Command{
+		Use:   "github",
+		Short: "GitHub account commands",
+	}
+	var githubConnectCmd = &cobra.Command{
+		Use:   "connect",
+		Short: "Connect a GitHub account via Personal Access Token",
+		Long: `Store a GitHub Personal Access Token so the agent can clone and pull
+private dotfiles repositories without going through a broker.
+
+Create a token at https://github.com/settings/tokens with the 'repo' scope,
+then run:
+
+  dotsync-agent github connect --token ghp_xxxxxxxxxxxx`,
+		Run: func(cmd *cobra.Command, args []string) {
+			if githubToken == "" {
+				Error("--token is required")
+				os.Exit(1)
+			}
+
+			config, err := InitializeConfigurations(dotFilePath, configDir)
+			if err != nil {
+				Error("configuration error: " + err.Error())
+				os.Exit(1)
+			}
+
+			identity, err := loadAgentIdentity(config)
+			if err != nil || identity == nil {
+				identity = &AgentIdentity{}
+			}
+
+			identity.GithubToken = githubToken
+			if err := saveAgentIdentity(config, identity); err != nil {
+				Error("failed to save token: " + err.Error())
+				os.Exit(1)
+			}
+
+			Successln("GitHub account connected ✅")
+		},
+	}
+	githubConnectCmd.Flags().StringVar(&githubToken, "token", "", "GitHub Personal Access Token (requires repo scope)")
+	_ = githubConnectCmd.MarkFlagRequired("token")
+	githubCmd.AddCommand(githubConnectCmd)
+
+	rootCmd.AddCommand(registerCmd, syncCmd, daemonCmd, applyCmd, githubCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		Error(err.Error())
@@ -260,14 +306,10 @@ func runSync(daemon bool) {
 	mutex := &sync.Mutex{}
 	syncer := NewEnhancedSyncer(config, brokerNotifier, mutex, git)
 
-	// Fetch GitHub token from broker so the agent can clone private repos.
-	if ghToken, err := brokerNotifier.FetchGitHubToken(); err != nil {
-		Warnln("could not fetch GitHub token from broker: " + err.Error())
-	} else if ghToken != "" {
-		config.GithubToken = ghToken
-		Infoln("GitHub token loaded from broker 🔑")
-	} else {
-		Warnln("GitHub account not connected — private repos may be inaccessible")
+	// Load GitHub token from local identity (set via `github connect`).
+	if identity.GithubToken != "" {
+		config.GithubToken = identity.GithubToken
+		Infoln("GitHub token loaded 🔑")
 	}
 
 	// Configure Git Repo from Broker
