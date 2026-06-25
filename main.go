@@ -89,10 +89,17 @@ Examples:
   dotsync-agent apply -f ~/dotfiles/.dotsync.yaml
   dotsync-agent apply --dry-run              # validate and print plan without executing`,
 		Run: func(cmd *cobra.Command, args []string) {
-			// Resolve spec file path
+			// Load config first so we can resolve the default spec path.
+			config, err := InitializeConfigurations(dotFilePath, configDir)
+			if err != nil {
+				Error("configuration error: " + err.Error())
+				os.Exit(1)
+			}
+
+			// Resolve spec file path: explicit flag → dotfiles repo root → cwd.
 			specPath := applyFile
 			if specPath == "" {
-				specPath = ".dotsync.yaml"
+				specPath = filepath.Join(config.DotfilePath, config.GitRepository, ".dotsync.yaml")
 			}
 
 			// Read and parse the spec
@@ -144,11 +151,6 @@ Examples:
 			}
 
 			// Execute
-			config, err := InitializeConfigurations(dotFilePath, configDir)
-			if err != nil {
-				Error("configuration error: " + err.Error())
-				os.Exit(1)
-			}
 			git := &Git{config}
 			executor := NewPlanExecutor(config, nil, git)
 			if err := executor.Execute("cli-apply", plan); err != nil {
