@@ -260,6 +260,16 @@ func runSync(daemon bool) {
 	mutex := &sync.Mutex{}
 	syncer := NewEnhancedSyncer(config, brokerNotifier, mutex, git)
 
+	// Fetch GitHub token from broker so the agent can clone private repos.
+	if ghToken, err := brokerNotifier.FetchGitHubToken(); err != nil {
+		Warnln("could not fetch GitHub token from broker: " + err.Error())
+	} else if ghToken != "" {
+		config.GithubToken = ghToken
+		Infoln("GitHub token loaded from broker 🔑")
+	} else {
+		Warnln("GitHub account not connected — private repos may be inaccessible")
+	}
+
 	// Configure Git Repo from Broker
 	repoURL, err := brokerNotifier.GetRepositoryConfig()
 	if err != nil {
