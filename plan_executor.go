@@ -113,7 +113,7 @@ func (e *PlanExecutor) executeFileSync(runID string, plan *ExecutionPlan) error 
 		}
 
 		if _, err := os.Stat(src); os.IsNotExist(err) {
-			Infoln("WARNING: source not found, skipping:", mapping.Source)
+			Warnln("source not found, skipping:", mapping.Source)
 			continue
 		}
 

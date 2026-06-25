@@ -28,6 +28,15 @@ func Info(v ...string) {
 	fmt.Print(time.Now().Format(time.RFC3339), " INFO:", s)
 }
 
+// Warnln prints a warning log message with timestamp to stdout.
+func Warnln(v ...string) {
+	s := ""
+	for _, c := range v {
+		s = s + " " + c
+	}
+	fmt.Println(time.Now().Format(time.RFC3339), "WARN: ", s)
+}
+
 // Error prints an error log message with timestamp to stdout.
 // All arguments are concatenated with spaces between them.
 func Error(v ...string) {
