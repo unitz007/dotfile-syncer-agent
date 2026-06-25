@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strings"
+	"time"
 )
 
 // BrokerNotifier handles communication with an external broker service for monitoring and notifications.
@@ -586,4 +589,96 @@ func (b BrokerNotifier) ReportPolicyRunResult(runID string, status string, resul
 	}
 
 	return nil
+}
+
+// startSSEListener opens a persistent SSE connection to the broker's
+// /agent/events endpoint and calls onSync whenever a priority_sync event
+// arrives. It reconnects with exponential backoff (1s → 2s → … → 60s),
+// resetting to 1s after a connection that lasted more than 30 seconds.
+// The goroutine runs indefinitely; callers should invoke it with go.
+func (b BrokerNotifier) startSSEListener(onSync func()) {
+	const (
+		minBackoff = 1 * time.Second
+		maxBackoff = 60 * time.Second
+		resetAfter = 30 * time.Second // connection considered stable after this
+	)
+
+	backoff := minBackoff
+
+	for {
+		if b.brokerUrl == "" || b.agentToken == "" {
+			// Broker not configured; SSE not possible.
+			return
+		}
+
+		req, err := http.NewRequest(http.MethodGet, b.brokerUrl+"/agent/events", nil)
+		if err != nil {
+			Infoln("SSE: failed to build request:", err.Error())
+			time.Sleep(backoff)
+			backoff = min(backoff*2, maxBackoff)
+			continue
+		}
+		req.Header.Set("Authorization", "Agent "+b.agentToken)
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Cache-Control", "no-cache")
+
+		connStart := time.Now()
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			Infoln("SSE: connect error, retrying in", backoff.String()+":", err.Error())
+			time.Sleep(backoff)
+			backoff = min(backoff*2, maxBackoff)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			Infoln("SSE: unexpected status", resp.Status+", retrying in", backoff.String())
+			time.Sleep(backoff)
+			backoff = min(backoff*2, maxBackoff)
+			continue
+		}
+
+		Infoln("SSE: connected to broker event stream")
+
+		// Read SSE lines until EOF or error.
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if data == "" {
+				continue
+			}
+			var event struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				continue
+			}
+			if event.Type == "priority_sync" {
+				Infoln("SSE: received priority_sync event")
+				onSync()
+			}
+		}
+		_ = resp.Body.Close()
+
+		elapsed := time.Since(connStart)
+		if elapsed > resetAfter {
+			backoff = minBackoff
+		} else {
+			backoff = min(backoff*2, maxBackoff)
+		}
+		Infoln("SSE: disconnected, reconnecting in", backoff.String())
+		time.Sleep(backoff)
+	}
+}
+
+func min(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }

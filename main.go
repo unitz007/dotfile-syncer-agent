@@ -252,7 +252,25 @@ func runSync(daemon bool) {
 		}
 	}()
 
-	// Main Loop: Priority Sync
+	// prioritySync performs a sync and acks the command, guarded by the shared
+	// mutex so that simultaneous triggers from SSE and the poll ticker do not
+	// run concurrent syncs.
+	prioritySync := func() {
+		mutex.Lock()
+		defer mutex.Unlock()
+		Infoln("Triggering Priority Sync")
+		syncer.Sync()
+		if err := brokerNotifier.AckPrioritySyncCommand(); err != nil {
+			Error("Failed to ack priority sync: " + err.Error())
+		}
+	}
+
+	// 4. SSE listener — event-driven priority sync push from the broker.
+	//    Reconnects with exponential backoff. The 10-second poll below remains
+	//    as a fallback when SSE is unavailable.
+	go brokerNotifier.startSSEListener(prioritySync)
+
+	// Main Loop: Priority Sync (fallback poll, remains active alongside SSE)
 	for {
 		select {
 		case <-ticker.C:
@@ -264,12 +282,7 @@ func runSync(daemon bool) {
 			if !hasCommand {
 				continue
 			}
-			Infoln("Triggering Priority Sync")
-			syncer.Sync()
-			err = brokerNotifier.AckPrioritySyncCommand()
-			if err != nil {
-				Error("Failed to ack priority sync: " + err.Error())
-			}
+			prioritySync()
 		}
 	}
 }
