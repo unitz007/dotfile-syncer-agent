@@ -150,9 +150,9 @@ Examples:
 				return
 			}
 
-			// Execute
+			// Execute — skip git pull; files are already local
 			git := &Git{config}
-			executor := NewPlanExecutor(config, nil, git)
+			executor := &PlanExecutor{config: config, git: git, NoPull: true}
 			if err := executor.Execute("cli-apply", plan); err != nil {
 				Error("apply failed: " + err.Error())
 				os.Exit(1)

@@ -18,6 +18,7 @@ type PlanExecutor struct {
 	config         *Configurations
 	brokerNotifier *BrokerNotifier
 	git            *Git
+	NoPull         bool // when true, skip git pull and apply from local repo state
 }
 
 func NewPlanExecutor(config *Configurations, brokerNotifier *BrokerNotifier, git *Git) *PlanExecutor {
@@ -87,19 +88,11 @@ func (e *PlanExecutor) executeFileSync(runID string, plan *ExecutionPlan) error 
 	// TODO: Handle different repos or multiple repos? 
 	// The current architecture assumes one main dotfile repo.
 	
-	e.reportStatus(runID, "running", "Syncing repository...")
-	// We can reuse e.git to pull/clone.
-	// But e.git is initialized with e.config which has the path.
-	// If plan.DotfilesRepo is different, we might have a mismatch.
-	// We'll update e.config.GitUrl if needed, but the path remains.
-	
-	if repoURL != "" && repoURL != e.config.GitUrl {
-		// Update config for this run? Or just warn?
-		// e.config.GitUrl = repoURL // This might be risky if we persist it.
-	}
-
-	if err := e.git.CloneOrPullRepository(); err != nil {
-		return fmt.Errorf("failed to sync repository: %w", err)
+	if !e.NoPull {
+		e.reportStatus(runID, "running", "Syncing repository...")
+		if err := e.git.CloneOrPullRepository(); err != nil {
+			return fmt.Errorf("failed to sync repository: %w", err)
+		}
 	}
 
 	// 2. Process Files
