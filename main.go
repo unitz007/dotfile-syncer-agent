@@ -291,52 +291,53 @@ func runSync(daemon bool) {
 		os.Exit(1)
 	}
 
-	identity, err := loadAgentIdentity(config)
-	if err != nil {
-		Error("Failed to load agent identity. Please run 'register' first.")
-		os.Exit(1)
-	}
-	if identity == nil {
-		Error("Agent identity not found. Please run 'register' first.")
-		os.Exit(1)
-	}
-
-	git := &Git{config}
-	brokerNotifier := NewBrokerNotifier(git, identity.AgentID, identity.AgentToken, identity.MachineName, identity.BrokerURL)
-	mutex := &sync.Mutex{}
-	syncer := NewEnhancedSyncer(config, brokerNotifier, mutex, git)
+	// Identity is optional. Absence means standalone mode (no broker).
+	identity, _ := loadAgentIdentity(config)
 
 	// Load GitHub token from local identity (set via `github connect`).
-	if identity.GithubToken != "" {
+	if identity != nil && identity.GithubToken != "" {
 		config.GithubToken = identity.GithubToken
 		Infoln("GitHub token loaded 🔑")
 	}
 
-	// Configure Git Repo from Broker
-	repoURL, err := brokerNotifier.GetRepositoryConfig()
-	if err != nil {
-		Infoln("WARN: Failed to fetch repository config: " + err.Error())
-	} else {
-		config.GitUrl = repoURL
-		config.GitApiBaseUrl = "https://api.github.com"
+	git := &Git{config}
+	mutex := &sync.Mutex{}
 
-		owner, repo, err := ParseGitUrl(repoURL)
-		if err != nil {
-			Infoln("WARN: Failed to parse git url: " + err.Error())
-		} else {
-			config.RepositoryOwner = owner
-			config.GitRepository = repo
-			Infoln("Configured repository:", owner, "/", repo)
+	// Broker notifier is only created when a broker URL and agent token are present.
+	var brokerNotifier *BrokerNotifier
+	if identity != nil && identity.BrokerURL != "" && identity.AgentToken != "" {
+		brokerNotifier = NewBrokerNotifier(git, identity.AgentID, identity.AgentToken, identity.MachineName, identity.BrokerURL)
+		Infoln("Broker connected:", identity.BrokerURL)
+
+		// Fetch repo URL from broker.
+		if repoURL, err := brokerNotifier.GetRepositoryConfig(); err != nil {
+			Warnln("could not fetch repository config from broker: " + err.Error())
+		} else if repoURL != "" {
+			config.GitUrl = repoURL
+			config.GitApiBaseUrl = "https://api.github.com"
+			if owner, repo, err := ParseGitUrl(repoURL); err != nil {
+				Warnln("could not parse git URL: " + err.Error())
+			} else {
+				config.RepositoryOwner = owner
+				config.GitRepository = repo
+				Infoln("Configured repository:", owner+"/"+repo)
+			}
 		}
 
-		err = git.CloneOrPullRepository()
-		if err != nil {
+		brokerNotifier.RegisterStream()
+		runBootstrapSelfTest(brokerNotifier, config)
+	} else {
+		Infoln("Running in standalone mode (no broker)")
+	}
+
+	// Clone / pull repo when a URL is configured.
+	if config.GitUrl != "" {
+		if err := git.CloneOrPullRepository(); err != nil {
 			Error("Failed to clone/pull repository: " + err.Error())
 		}
 	}
 
-	brokerNotifier.RegisterStream()
-	runBootstrapSelfTest(brokerNotifier, config)
+	syncer := NewEnhancedSyncer(config, brokerNotifier, mutex, git)
 
 	// Initial Sync
 	Infoln("Starting sync...")
@@ -347,18 +348,15 @@ func runSync(daemon bool) {
 		return
 	}
 
-	// Daemon Loop
-	ticker := time.NewTicker(10 * time.Second)
-
-	// Start other background services
 	planExecutor := NewPlanExecutor(config, brokerNotifier, git)
 
-	// 1. Policy Executor
-	go func() {
-		policyTicker := time.NewTicker(15 * time.Second)
-		for {
-			select {
-			case <-policyTicker.C:
+	if brokerNotifier != nil {
+		// ── Broker-mode background services ───────────────────────────────────
+
+		// 1. Policy Executor
+		go func() {
+			policyTicker := time.NewTicker(15 * time.Second)
+			for range policyTicker.C {
 				cmd, err := brokerNotifier.NextPolicyRunCommand()
 				if err != nil {
 					Error("Error checking for policy run: " + err.Error())
@@ -370,10 +368,7 @@ func runSync(daemon bool) {
 
 				Infoln("Received Policy Run:", cmd.RunID)
 
-				// Repo path is where the agent clones the dotfiles repository.
 				repoPath := filepath.Join(config.DotfilePath, config.GitRepository)
-
-				// Check for spec in the dotfiles repo (.dotsync.yaml).
 				repoSpec, err := LoadSpecFromRepo(repoPath)
 				if err != nil {
 					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "failed", map[string]string{
@@ -382,17 +377,12 @@ func runSync(daemon bool) {
 					continue
 				}
 
-				// Merge: repo file is the base, broker spec overrides scalars and
-				// wins on file-target conflicts. If only one source exists it is used
-				// as-is. MergeSpecs handles all nil combinations.
 				spec := MergeSpecs(repoSpec, cmd.Spec)
-
 				if spec == nil {
 					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "succeeded", map[string]string{"message": "no spec provided"})
 					continue
 				}
 
-				// Strict schema validation — hard fail on any violation.
 				if err := spec.Validate(); err != nil {
 					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "failed", map[string]string{
 						"error": "spec validation failed: " + err.Error(),
@@ -400,88 +390,83 @@ func runSync(daemon bool) {
 					continue
 				}
 
-				// Convert spec to an ExecutionPlan resolved for this agent's OS.
-				executionPlan := spec.ToExecutionPlan(runtime.GOOS)
-
-				_, err = planExecutor.Execute(cmd.RunID, executionPlan)
+				_, err = planExecutor.Execute(cmd.RunID, spec.ToExecutionPlan(runtime.GOOS))
 				if err != nil {
 					Error("Policy Execution Failed: " + err.Error())
 				} else {
 					Successln("Policy execution completed 🎯")
 				}
 			}
-		}
-	}()
+		}()
 
-	// 2. Connectivity Check
-	go func() {
-		connTicker := time.NewTicker(10 * time.Second)
-		for {
-			select {
-			case <-connTicker.C:
-				hasConnectivity, err := brokerNotifier.HasConnectivityCommand()
-				if err != nil {
-					Error(err.Error())
+		// 2. Connectivity Check
+		go func() {
+			for range time.NewTicker(10 * time.Second).C {
+				if has, err := brokerNotifier.HasConnectivityCommand(); err != nil || !has {
 					continue
 				}
-				if !hasConnectivity {
-					continue
-				}
-				err = brokerNotifier.Ping()
-				if err != nil {
-					Error(err.Error())
-				}
-				err = brokerNotifier.AckConnectivityCommand()
-				if err != nil {
-					Error(err.Error())
-				}
+				_ = brokerNotifier.Ping()
+				_ = brokerNotifier.AckConnectivityCommand()
 			}
-		}
-	}()
+		}()
 
-	// 3. Heartbeat
-	go func() {
-		hbTicker := time.NewTicker(30 * time.Second)
-		_ = brokerNotifier.Ping()
-		for {
-			select {
-			case <-hbTicker.C:
+		// 3. Heartbeat
+		go func() {
+			_ = brokerNotifier.Ping()
+			for range time.NewTicker(30 * time.Second).C {
 				_ = brokerNotifier.Ping()
 			}
-		}
-	}()
+		}()
 
-	// prioritySync performs a sync and acks the command, guarded by the shared
-	// mutex so that simultaneous triggers from SSE and the poll ticker do not
-	// run concurrent syncs.
-	prioritySync := func() {
-		mutex.Lock()
-		defer mutex.Unlock()
-		Infoln("Triggering Priority Sync")
-		syncer.Sync()
-		if err := brokerNotifier.AckPrioritySyncCommand(); err != nil {
-			Error("Failed to ack priority sync: " + err.Error())
-		}
-	}
-
-	// 4. SSE listener — event-driven priority sync push from the broker.
-	//    Reconnects with exponential backoff. The 10-second poll below remains
-	//    as a fallback when SSE is unavailable.
-	go brokerNotifier.startSSEListener(prioritySync)
-
-	// Main Loop: Priority Sync (fallback poll, remains active alongside SSE)
-	for {
-		select {
-		case <-ticker.C:
-			hasCommand, err := brokerNotifier.HasPrioritySyncCommand()
-			if err != nil {
-				Error(err.Error())
-				continue
+		// 4. SSE + fallback poll for priority sync
+		prioritySync := func() {
+			mutex.Lock()
+			defer mutex.Unlock()
+			Infoln("Triggering Priority Sync")
+			syncer.Sync()
+			if err := brokerNotifier.AckPrioritySyncCommand(); err != nil {
+				Error("Failed to ack priority sync: " + err.Error())
 			}
-			if !hasCommand {
+		}
+
+		go brokerNotifier.startSSEListener(prioritySync)
+
+		for range time.NewTicker(10 * time.Second).C {
+			if has, err := brokerNotifier.HasPrioritySyncCommand(); err != nil || !has {
 				continue
 			}
 			prioritySync()
+		}
+	} else {
+		// ── Standalone daemon: pull + apply spec every 5 minutes ──────────────
+		Infoln("Standalone daemon started — syncing every 5 minutes")
+		for range time.NewTicker(5 * time.Minute).C {
+			Infoln("Periodic sync...")
+			if config.GitUrl != "" {
+				if err := git.CloneOrPullRepository(); err != nil {
+					Error("git pull failed: " + err.Error())
+					continue
+				}
+			}
+			repoPath := filepath.Join(config.DotfilePath, config.GitRepository)
+			spec, err := LoadSpecFromRepo(repoPath)
+			if err != nil {
+				Error("could not read .dotsync.yaml: " + err.Error())
+				continue
+			}
+			if spec == nil {
+				Warnln("no .dotsync.yaml found in repo — nothing to apply")
+				continue
+			}
+			if err := spec.Validate(); err != nil {
+				Error("spec validation failed: " + err.Error())
+				continue
+			}
+			if _, err := planExecutor.Execute("standalone", spec.ToExecutionPlan(runtime.GOOS)); err != nil {
+				Error("sync failed: " + err.Error())
+			} else {
+				Successln("Sync completed 🔄")
+			}
 		}
 	}
 }
