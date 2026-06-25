@@ -31,8 +31,11 @@ func TestBrokerNotifier_NextPolicyRunCommand(t *testing.T) {
 				Spec: SyncPolicySpecBody{
 					Repository: "https://github.com/test/repo",
 					Strategy:   "symlink",
-					Files: []SpecFileMapping{
-						{Source: ".bashrc", Target: "~/.bashrc"},
+					Software: []SpecSoftware{
+						{
+							Name:    "shell",
+							Configs: []SpecFileMapping{{Source: ".bashrc", Target: "~/.bashrc"}},
+						},
 					},
 				},
 			},

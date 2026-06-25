@@ -2,10 +2,19 @@ package main
 
 import "fmt"
 
+// SoftwareUnit groups a named software's install commands and config file mappings.
+// The executor installs packages first; on failure the unit's configs are skipped.
+type SoftwareUnit struct {
+	Name    string        `json:"name"`
+	Install []string      `json:"install"`
+	Files   []FileMapping `json:"files"`
+}
+
 // ExecutionPlan represents the set of instructions for the Agent to execute.
 // It mirrors the structure returned by the Broker's Policy Engine.
 type ExecutionPlan struct {
 	// Install contains a sequential list of shell commands to install required software.
+	// Kept for backward compat with legacy flat plans; prefer SoftwareUnits for new specs.
 	Install []string `json:"install"`
 
 	// DotfilesRepo is the URL of the Git repository to sync.
@@ -18,7 +27,11 @@ type ExecutionPlan struct {
 	WebhookEnabled bool `json:"webhook_enabled"`
 
 	// Files maps source files from the repo to target paths on the agent.
+	// Kept for backward compat with legacy flat plans; prefer SoftwareUnits for new specs.
 	Files []FileMapping `json:"files"`
+
+	// SoftwareUnits groups packages and configs by software unit (new spec format).
+	SoftwareUnits []SoftwareUnit `json:"software_units,omitempty"`
 }
 
 // FileMapping defines a single file synchronization rule.
@@ -45,6 +58,11 @@ type PolicyRunCommand struct {
 func (p *ExecutionPlan) Validate() error {
 	if p == nil {
 		return nil // Empty plan is technically valid (no-op)
+	}
+
+	// When software units are present, the old flat fields won't be set — skip legacy validation.
+	if len(p.SoftwareUnits) > 0 {
+		return nil
 	}
 
 	// Validate DotfilesRepo if files are present

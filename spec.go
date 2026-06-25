@@ -24,13 +24,20 @@ type SpecMetadata struct {
 }
 
 type SyncPolicySpecBody struct {
-	Repository string                   `yaml:"repository" json:"repository"`
-	Branch     string                   `yaml:"branch"     json:"branch"`
-	Strategy   string                   `yaml:"strategy"   json:"strategy"`
-	Mode       string                   `yaml:"mode"       json:"mode"`
-	Files      []SpecFileMapping        `yaml:"files"      json:"files"`
-	Packages   map[string][]SpecPackage `yaml:"packages"   json:"packages"`
-	Hooks      SpecHooks                `yaml:"hooks"      json:"hooks"`
+	Repository string          `yaml:"repository" json:"repository"`
+	Branch     string          `yaml:"branch"     json:"branch"`
+	Strategy   string          `yaml:"strategy"   json:"strategy"`
+	Mode       string          `yaml:"mode"       json:"mode"`
+	Software   []SpecSoftware  `yaml:"software"   json:"software"`
+	Hooks      SpecHooks       `yaml:"hooks"      json:"hooks"`
+}
+
+// SpecSoftware groups a named software unit's packages and config file mappings.
+// The executor installs packages first; on failure the unit's configs are skipped.
+type SpecSoftware struct {
+	Name     string                   `yaml:"name"     json:"name"`
+	Packages map[string][]SpecPackage `yaml:"packages" json:"packages"`
+	Configs  []SpecFileMapping        `yaml:"configs"  json:"configs"`
 }
 
 type SpecFileMapping struct {
@@ -80,28 +87,36 @@ func (s *SyncPolicySpec) Validate() error {
 	if s.Spec.Mode != "" && s.Spec.Mode != "dry_run" && s.Spec.Mode != "enforce" {
 		return fmt.Errorf("invalid spec.mode %q: must be \"dry_run\" or \"enforce\"", s.Spec.Mode)
 	}
-	for i, f := range s.Spec.Files {
-		if strings.TrimSpace(f.Source) == "" {
-			return fmt.Errorf("spec.files[%d]: source must be non-empty", i)
+	for i, sw := range s.Spec.Software {
+		if strings.TrimSpace(sw.Name) == "" {
+			return fmt.Errorf("spec.software[%d]: name must be non-empty", i)
 		}
-		if strings.Contains(f.Source, "..") {
-			return fmt.Errorf("spec.files[%d]: source %q must not contain \"..\"", i, f.Source)
+		if len(sw.Packages) == 0 && len(sw.Configs) == 0 {
+			return fmt.Errorf("spec.software[%d] (%q): must have at least one of packages or configs", i, sw.Name)
 		}
-		if strings.TrimSpace(f.Target) == "" {
-			return fmt.Errorf("spec.files[%d]: target must be non-empty", i)
-		}
-		// ~/... paths are home-relative, not absolute — they are allowed.
-		if filepath.IsAbs(f.Target) {
-			return fmt.Errorf("spec.files[%d]: target %q must not be an absolute path (use ~/... instead)", i, f.Target)
-		}
-	}
-	for osKey, pkgs := range s.Spec.Packages {
-		for j, pkg := range pkgs {
-			if !allowedManagers[pkg.Manager] {
-				return fmt.Errorf("spec.packages[%s][%d]: manager %q is not in the allowlist", osKey, j, pkg.Manager)
+		for osKey, pkgs := range sw.Packages {
+			for j, pkg := range pkgs {
+				if !allowedManagers[pkg.Manager] {
+					return fmt.Errorf("spec.software[%d].packages[%s][%d]: manager %q is not in the allowlist", i, osKey, j, pkg.Manager)
+				}
+				if strings.TrimSpace(pkg.Name) == "" {
+					return fmt.Errorf("spec.software[%d].packages[%s][%d]: package name must be non-empty", i, osKey, j)
+				}
 			}
-			if strings.TrimSpace(pkg.Name) == "" {
-				return fmt.Errorf("spec.packages[%s][%d]: package name must be non-empty", osKey, j)
+		}
+		for j, f := range sw.Configs {
+			if strings.TrimSpace(f.Source) == "" {
+				return fmt.Errorf("spec.software[%d].configs[%d]: source must be non-empty", i, j)
+			}
+			if strings.Contains(f.Source, "..") {
+				return fmt.Errorf("spec.software[%d].configs[%d]: source %q must not contain \"..\"", i, j, f.Source)
+			}
+			if strings.TrimSpace(f.Target) == "" {
+				return fmt.Errorf("spec.software[%d].configs[%d]: target must be non-empty", i, j)
+			}
+			// ~/... paths are home-relative, not absolute — they are allowed.
+			if filepath.IsAbs(f.Target) {
+				return fmt.Errorf("spec.software[%d].configs[%d]: target %q must not be an absolute path (use ~/... instead)", i, j, f.Target)
 			}
 		}
 	}
@@ -175,43 +190,83 @@ func MergeSpecs(base, override *SyncPolicySpec) *SyncPolicySpec {
 		merged.Spec.Mode = override.Spec.Mode
 	}
 
-	// Files: start with base, override wins on same target.
-	filesByTarget := make(map[string]SpecFileMapping)
-	for _, f := range base.Spec.Files {
-		filesByTarget[f.Target] = f
-	}
-	for _, f := range override.Spec.Files {
-		filesByTarget[f.Target] = f // override wins
-	}
-	for _, f := range filesByTarget {
-		merged.Spec.Files = append(merged.Spec.Files, f)
+	// Software units: merge by name.
+	// Units only in base or only in override are included as-is.
+	// Units in both: union packages per OS (dedup by manager/name), union configs (dedup by target, override wins).
+	unitsByName := make(map[string]*SpecSoftware)
+	var order []string
+
+	for i := range base.Spec.Software {
+		sw := base.Spec.Software[i]
+		unitsByName[sw.Name] = &SpecSoftware{
+			Name:     sw.Name,
+			Packages: clonePackages(sw.Packages),
+			Configs:  append([]SpecFileMapping(nil), sw.Configs...),
+		}
+		order = append(order, sw.Name)
 	}
 
-	// Packages: union per OS, deduplicate by (manager, name).
-	merged.Spec.Packages = make(map[string][]SpecPackage)
-	allOS := make(map[string]bool)
-	for osKey := range base.Spec.Packages {
-		allOS[osKey] = true
-	}
-	for osKey := range override.Spec.Packages {
-		allOS[osKey] = true
-	}
-	for osKey := range allOS {
-		seen := make(map[string]bool)
-		for _, pkg := range append(base.Spec.Packages[osKey], override.Spec.Packages[osKey]...) {
-			key := pkg.Manager + "/" + pkg.Name
-			if !seen[key] {
-				seen[key] = true
-				merged.Spec.Packages[osKey] = append(merged.Spec.Packages[osKey], pkg)
+	for _, sw := range override.Spec.Software {
+		if existing, ok := unitsByName[sw.Name]; ok {
+			// Merge packages per OS: union, dedup by manager/name.
+			for osKey, pkgs := range sw.Packages {
+				seen := make(map[string]bool)
+				for _, p := range existing.Packages[osKey] {
+					seen[p.Manager+"/"+p.Name] = true
+				}
+				for _, p := range pkgs {
+					key := p.Manager + "/" + p.Name
+					if !seen[key] {
+						seen[key] = true
+						existing.Packages[osKey] = append(existing.Packages[osKey], p)
+					}
+				}
 			}
+			// Merge configs: override wins on same target.
+			configsByTarget := make(map[string]SpecFileMapping)
+			for _, f := range existing.Configs {
+				configsByTarget[f.Target] = f
+			}
+			for _, f := range sw.Configs {
+				configsByTarget[f.Target] = f
+			}
+			existing.Configs = make([]SpecFileMapping, 0, len(configsByTarget))
+			for _, f := range configsByTarget {
+				existing.Configs = append(existing.Configs, f)
+			}
+		} else {
+			unitsByName[sw.Name] = &SpecSoftware{
+				Name:     sw.Name,
+				Packages: clonePackages(sw.Packages),
+				Configs:  append([]SpecFileMapping(nil), sw.Configs...),
+			}
+			order = append(order, sw.Name)
 		}
+	}
+
+	for _, name := range order {
+		merged.Spec.Software = append(merged.Spec.Software, *unitsByName[name])
 	}
 
 	return merged
 }
 
+// clonePackages deep-copies a packages map to avoid aliasing between merged specs.
+func clonePackages(src map[string][]SpecPackage) map[string][]SpecPackage {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string][]SpecPackage, len(src))
+	for osKey, pkgs := range src {
+		dst[osKey] = append([]SpecPackage(nil), pkgs...)
+	}
+	return dst
+}
+
 // ToExecutionPlan converts the spec into an ExecutionPlan for the given platform
 // (e.g. "darwin", "linux").  Package resolution is performed on the agent side.
+// When the spec uses the software[] format, SoftwareUnits is populated and the
+// legacy Install/Files fields are left empty.
 func (s *SyncPolicySpec) ToExecutionPlan(platform string) *ExecutionPlan {
 	strategy := s.Spec.Strategy
 	if strategy == "" {
@@ -223,15 +278,18 @@ func (s *SyncPolicySpec) ToExecutionPlan(platform string) *ExecutionPlan {
 		SyncStrategy: strategy,
 	}
 
-	for _, f := range s.Spec.Files {
-		plan.Files = append(plan.Files, FileMapping{
-			Source: f.Source,
-			Target: f.Target,
-		})
-	}
-
-	for _, pkg := range s.Spec.Packages[platform] {
-		plan.Install = append(plan.Install, fmt.Sprintf("%s install %s", pkg.Manager, pkg.Name))
+	for _, sw := range s.Spec.Software {
+		unit := SoftwareUnit{Name: sw.Name}
+		for _, pkg := range sw.Packages[platform] {
+			unit.Install = append(unit.Install, fmt.Sprintf("%s install %s", pkg.Manager, pkg.Name))
+		}
+		for _, cfg := range sw.Configs {
+			unit.Files = append(unit.Files, FileMapping{
+				Source: cfg.Source,
+				Target: cfg.Target,
+			})
+		}
+		plan.SoftwareUnits = append(plan.SoftwareUnits, unit)
 	}
 
 	return plan
