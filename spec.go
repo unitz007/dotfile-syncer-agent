@@ -43,8 +43,13 @@ type SpecPackage struct {
 	Name    string `yaml:"name"    json:"name"`
 }
 
+type SpecHook struct {
+	Source  string `yaml:"source"  json:"source"`  // path to a script in the repo
+	Command string `yaml:"command" json:"command"` // inline shell command
+}
+
 type SpecHooks struct {
-	PostSync []string `yaml:"post_sync" json:"post_sync"`
+	PostSync []SpecHook `yaml:"post_sync" json:"post_sync"`
 }
 
 var allowedManagers = map[string]bool{
