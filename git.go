@@ -141,7 +141,7 @@ func (g Git) CloneOrPullRepository() error {
 				return err
 			}
 
-			Infoln("Clone successful")
+			Successln("Clone successful 📦")
 			return os.Chdir(g.config.GitRepository)
 		} else {
 			// Repository exists, pull latest changes
@@ -155,7 +155,7 @@ func (g Git) CloneOrPullRepository() error {
 			if err != nil {
 				return fmt.Errorf("git pull failed: %s, output: %s", err, string(output))
 			}
-			Infoln("Pull successful")
+			Successln("Pull successful ⬇️")
 			return nil
 
 		}

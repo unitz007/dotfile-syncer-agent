@@ -53,7 +53,7 @@ func main() {
 				Error("Registration failed: " + err.Error())
 				os.Exit(1)
 			}
-			Infoln("Agent registered successfully!")
+			Successln("Agent registered successfully! 🎉")
 		},
 	}
 	registerCmd.Flags().StringVar(&regBrokerURL, "broker-url", "", "Broker URL")
@@ -157,7 +157,7 @@ Examples:
 				Error("apply failed: " + err.Error())
 				os.Exit(1)
 			}
-			Infoln("Apply completed successfully.")
+			Successln("Apply completed successfully! ✨")
 		},
 	}
 	applyCmd.Flags().StringVarP(&applyFile, "file", "f", "", "path to spec file (default: .dotsync.yaml in current directory)")
@@ -258,7 +258,7 @@ func runSync(daemon bool) {
 	// Initial Sync
 	Infoln("Starting sync...")
 	syncer.Sync()
-	Infoln("Sync completed")
+	Successln("Sync completed 🔄")
 
 	if !daemon {
 		return
@@ -324,7 +324,7 @@ func runSync(daemon bool) {
 				if err != nil {
 					Error("Policy Execution Failed: " + err.Error())
 				} else {
-					Infoln("Policy Execution Completed Successfully")
+					Successln("Policy execution completed 🎯")
 				}
 			}
 		}
