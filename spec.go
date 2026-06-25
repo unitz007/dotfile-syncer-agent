@@ -123,6 +123,15 @@ func LoadSpecFromRepo(repoPath string) (*SyncPolicySpec, error) {
 	return &spec, nil
 }
 
+// ParseSpec parses a raw YAML or JSON byte slice into a SyncPolicySpec.
+func ParseSpec(data []byte) (*SyncPolicySpec, error) {
+	var spec SyncPolicySpec
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		return nil, fmt.Errorf("parse error: %w", err)
+	}
+	return &spec, nil
+}
+
 // MergeSpecs merges two specs with the following rules:
 //   - Scalar fields (repository, branch, strategy, mode): override wins when set.
 //   - Files: union of both lists; when the same target appears in both, override wins.

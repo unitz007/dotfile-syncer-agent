@@ -76,7 +76,92 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(registerCmd, syncCmd, daemonCmd)
+	// apply subcommand
+	var applyFile string
+	var applyDryRun bool
+	var applyCmd = &cobra.Command{
+		Use:   "apply",
+		Short: "Apply a SyncPolicy spec directly from the terminal",
+		Long: `Read, validate, and apply a SyncPolicy spec file.
+
+Examples:
+  dotsync-agent apply                        # reads .dotsync.yaml from current directory
+  dotsync-agent apply -f ~/dotfiles/.dotsync.yaml
+  dotsync-agent apply --dry-run              # validate and print plan without executing`,
+		Run: func(cmd *cobra.Command, args []string) {
+			// Resolve spec file path
+			specPath := applyFile
+			if specPath == "" {
+				specPath = ".dotsync.yaml"
+			}
+
+			// Read and parse the spec
+			data, err := os.ReadFile(specPath)
+			if err != nil {
+				Error("cannot read spec file: " + err.Error())
+				os.Exit(1)
+			}
+
+			spec, err := ParseSpec(data)
+			if err != nil {
+				Error("cannot parse spec: " + err.Error())
+				os.Exit(1)
+			}
+
+			// Strict validation
+			if err := spec.Validate(); err != nil {
+				Error("spec validation failed: " + err.Error())
+				os.Exit(1)
+			}
+
+			Infoln("Spec valid:", spec.Metadata.Name)
+
+			// Resolve execution plan for current OS
+			plan := spec.ToExecutionPlan(runtime.GOOS)
+
+			// Print what will be applied
+			Infoln("--- Execution Plan ---")
+			if len(plan.Install) == 0 {
+				Infoln("  packages: none for", runtime.GOOS)
+			} else {
+				for _, cmd := range plan.Install {
+					Infoln("  install:", cmd)
+				}
+			}
+			if len(plan.Files) == 0 {
+				Infoln("  files: none")
+			} else {
+				for _, f := range plan.Files {
+					Infoln("  file:", f.Source, "->", f.Target)
+				}
+			}
+			Infoln("  strategy:", plan.SyncStrategy)
+			Infoln("----------------------")
+
+			if applyDryRun {
+				Infoln("Dry run — no changes applied.")
+				return
+			}
+
+			// Execute
+			config, err := InitializeConfigurations(dotFilePath, configDir)
+			if err != nil {
+				Error("configuration error: " + err.Error())
+				os.Exit(1)
+			}
+			git := &Git{config}
+			executor := NewPlanExecutor(config, nil, git)
+			if err := executor.Execute("cli-apply", plan); err != nil {
+				Error("apply failed: " + err.Error())
+				os.Exit(1)
+			}
+			Infoln("Apply completed successfully.")
+		},
+	}
+	applyCmd.Flags().StringVarP(&applyFile, "file", "f", "", "path to spec file (default: .dotsync.yaml in current directory)")
+	applyCmd.Flags().BoolVar(&applyDryRun, "dry-run", false, "validate and print execution plan without applying")
+
+	rootCmd.AddCommand(registerCmd, syncCmd, daemonCmd, applyCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		Error(err.Error())
