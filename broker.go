@@ -64,12 +64,6 @@ type PolicyRunCommandPolicy struct {
 	Paths []string `json:"paths"`
 }
 
-type PolicyRunCommand struct {
-	RunID         string                   `json:"run_id"`
-	Policies      []PolicyRunCommandPolicy `json:"policies"`
-	ExecutionPlan *ExecutionPlan           `json:"execution_plan"`
-}
-
 func loadAgentIdentity(config *Configurations) (*AgentIdentity, error) {
 	if config == nil || config.ConfigPath == "" {
 		return nil, nil
@@ -527,10 +521,9 @@ func (b BrokerNotifier) NextPolicyRunCommand() (*PolicyRunCommand, error) {
 	}
 
 	var payload struct {
-		HasRun        bool                     `json:"has_run"`
-		RunID         string                   `json:"run_id"`
-		Policies      []PolicyRunCommandPolicy `json:"policies"`
-		ExecutionPlan *ExecutionPlan           `json:"execution_plan"`
+		HasRun bool            `json:"has_run"`
+		RunID  string          `json:"run_id"`
+		Spec   *SyncPolicySpec `json:"spec"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
@@ -539,16 +532,10 @@ func (b BrokerNotifier) NextPolicyRunCommand() (*PolicyRunCommand, error) {
 		return nil, nil
 	}
 
-	if payload.ExecutionPlan != nil {
-		if err := payload.ExecutionPlan.Validate(); err != nil {
-			return nil, fmt.Errorf("invalid execution plan received: %v", err)
-		}
-	}
-
+	// Validation is deliberately deferred to main.go — the agent owns that step.
 	return &PolicyRunCommand{
-		RunID:         payload.RunID,
-		Policies:      payload.Policies,
-		ExecutionPlan: payload.ExecutionPlan,
+		RunID: payload.RunID,
+		Spec:  payload.Spec,
 	}, nil
 }
 

@@ -8,7 +8,7 @@ import (
 )
 
 func TestBrokerNotifier_NextPolicyRunCommand(t *testing.T) {
-	// Mock Broker Server
+	// Mock Broker Server returning the new spec-based payload.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/agent/policy-run" {
 			t.Errorf("Expected path /agent/policy-run, got %s", r.URL.Path)
@@ -17,19 +17,23 @@ func TestBrokerNotifier_NextPolicyRunCommand(t *testing.T) {
 			t.Errorf("Expected Authorization header 'Agent test-token', got %s", r.Header.Get("Authorization"))
 		}
 
-		// Response payload
 		response := struct {
-			HasRun        bool           `json:"has_run"`
-			RunID         string         `json:"run_id"`
-			ExecutionPlan *ExecutionPlan `json:"execution_plan"`
+			HasRun bool            `json:"has_run"`
+			RunID  string          `json:"run_id"`
+			Spec   *SyncPolicySpec `json:"spec"`
 		}{
 			HasRun: true,
 			RunID:  "run-123",
-			ExecutionPlan: &ExecutionPlan{
-				Install:      []string{"echo hello"},
-				DotfilesRepo: "https://github.com/test/repo",
-				Files: []FileMapping{
-					{Source: ".bashrc", Target: "~/.bashrc"},
+			Spec: &SyncPolicySpec{
+				APIVersion: "dotsync/v1",
+				Kind:       "SyncPolicy",
+				Metadata:   SpecMetadata{Name: "test"},
+				Spec: SyncPolicySpecBody{
+					Repository: "https://github.com/test/repo",
+					Strategy:   "symlink",
+					Files: []SpecFileMapping{
+						{Source: ".bashrc", Target: "~/.bashrc"},
+					},
 				},
 			},
 		}
@@ -37,14 +41,12 @@ func TestBrokerNotifier_NextPolicyRunCommand(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// BrokerNotifier
 	notifier := &BrokerNotifier{
 		brokerUrl:  server.URL,
 		agentToken: "test-token",
 		machine:    "agent-1",
 	}
 
-	// Call
 	cmd, err := notifier.NextPolicyRunCommand()
 	if err != nil {
 		t.Fatalf("NextPolicyRunCommand failed: %v", err)
@@ -58,31 +60,21 @@ func TestBrokerNotifier_NextPolicyRunCommand(t *testing.T) {
 		t.Errorf("Expected RunID 'run-123', got %s", cmd.RunID)
 	}
 
-	if cmd.ExecutionPlan == nil {
-		t.Fatal("Expected ExecutionPlan, got nil")
+	if cmd.Spec == nil {
+		t.Fatal("Expected Spec, got nil")
 	}
 
-	if len(cmd.ExecutionPlan.Install) != 1 || cmd.ExecutionPlan.Install[0] != "echo hello" {
-		t.Errorf("Unexpected Install commands: %v", cmd.ExecutionPlan.Install)
+	if cmd.Spec.Metadata.Name != "test" {
+		t.Errorf("Unexpected spec name: %s", cmd.Spec.Metadata.Name)
 	}
 }
 
-func TestBrokerNotifier_NextPolicyRunCommand_InvalidPlan(t *testing.T) {
-	// Mock Broker Server returning invalid plan
+func TestBrokerNotifier_NextPolicyRunCommand_NoRun(t *testing.T) {
+	// Mock Broker Server returning has_run=false.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := struct {
-			HasRun        bool           `json:"has_run"`
-			RunID         string         `json:"run_id"`
-			ExecutionPlan *ExecutionPlan `json:"execution_plan"`
-		}{
-			HasRun: true,
-			RunID:  "run-bad",
-			ExecutionPlan: &ExecutionPlan{
-				Files: []FileMapping{
-					{Source: ".bashrc", Target: ""}, // Invalid: empty target
-				},
-			},
-		}
+			HasRun bool `json:"has_run"`
+		}{HasRun: false}
 		json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
@@ -93,10 +85,10 @@ func TestBrokerNotifier_NextPolicyRunCommand_InvalidPlan(t *testing.T) {
 	}
 
 	cmd, err := notifier.NextPolicyRunCommand()
-	if err == nil {
-		t.Error("Expected validation error, got nil")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
 	}
 	if cmd != nil {
-		t.Error("Expected nil command on error, got struct")
+		t.Error("Expected nil command when has_run=false")
 	}
 }

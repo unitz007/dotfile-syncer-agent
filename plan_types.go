@@ -34,6 +34,13 @@ type PolicyRunResponse struct {
 	ExecutionPlan ExecutionPlan `json:"execution_plan,omitempty"`
 }
 
+// PolicyRunCommand carries a pending policy run delivered by the broker.
+// The broker now sends a raw SyncPolicySpec; the agent validates and applies it.
+type PolicyRunCommand struct {
+	RunID string          `json:"run_id"`
+	Spec  *SyncPolicySpec `json:"spec"`
+}
+
 // Validate checks if the execution plan is valid and safe to execute.
 func (p *ExecutionPlan) Validate() error {
 	if p == nil {

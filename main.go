@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -196,15 +198,51 @@ func runSync(daemon bool) {
 					continue
 				}
 
-				Infoln("Received Policy Run Command:", cmd.RunID)
+				Infoln("Received Policy Run:", cmd.RunID)
 
-				if cmd.ExecutionPlan == nil {
-					Infoln("Warning: Policy run has no execution plan. Skipping.")
-					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "succeeded", map[string]string{"message": "No execution plan provided"})
+				// Repo path is where the agent clones the dotfiles repository.
+				repoPath := filepath.Join(config.DotfilePath, config.GitRepository)
+
+				// Check for spec in the dotfiles repo (.dotsync.yaml).
+				repoSpec, err := LoadSpecFromRepo(repoPath)
+				if err != nil {
+					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "failed", map[string]string{
+						"error": "failed to read .dotsync.yaml: " + err.Error(),
+					})
 					continue
 				}
 
-				err = planExecutor.Execute(cmd.RunID, cmd.ExecutionPlan)
+				// Hard-fail: spec present in both sources is ambiguous.
+				if repoSpec != nil && cmd.Spec != nil {
+					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "failed", map[string]string{
+						"error": "conflict: SyncPolicy spec found in both .dotsync.yaml and broker policy run; cannot apply ambiguous spec",
+					})
+					continue
+				}
+
+				// Pick whichever source provided a spec.
+				spec := cmd.Spec
+				if repoSpec != nil {
+					spec = repoSpec
+				}
+
+				if spec == nil {
+					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "succeeded", map[string]string{"message": "no spec provided"})
+					continue
+				}
+
+				// Strict schema validation — hard fail on any violation.
+				if err := spec.Validate(); err != nil {
+					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "failed", map[string]string{
+						"error": "spec validation failed: " + err.Error(),
+					})
+					continue
+				}
+
+				// Convert spec to an ExecutionPlan resolved for this agent's OS.
+				executionPlan := spec.ToExecutionPlan(runtime.GOOS)
+
+				err = planExecutor.Execute(cmd.RunID, executionPlan)
 				if err != nil {
 					Error("Policy Execution Failed: " + err.Error())
 				} else {
