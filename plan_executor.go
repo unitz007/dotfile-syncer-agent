@@ -112,6 +112,11 @@ func (e *PlanExecutor) executeFileSync(runID string, plan *ExecutionPlan) error 
 			return fmt.Errorf("absolute target paths are not allowed: %s", mapping.Target)
 		}
 
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			Infoln("WARNING: source not found, skipping:", mapping.Source)
+			continue
+		}
+
 		e.reportStatus(runID, "running", fmt.Sprintf("Syncing %s -> %s", mapping.Source, target))
 
 		if err := installFile(src, target, plan.SyncStrategy); err != nil {
