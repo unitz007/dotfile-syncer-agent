@@ -153,11 +153,39 @@ Examples:
 			// Execute — skip git pull; files are already local
 			git := &Git{config}
 			executor := &PlanExecutor{config: config, git: git, NoPull: true}
-			if err := executor.Execute("cli-apply", plan); err != nil {
+			result, err := executor.Execute("cli-apply", plan)
+			if err != nil {
 				Error("apply failed: " + err.Error())
 				os.Exit(1)
 			}
-			Successln("Apply completed successfully! ✨")
+
+			// Print summary
+			fmt.Println()
+			fmt.Printf("  %s%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", bold, cyan, reset)
+			fmt.Printf("  %s  📋 Apply Summary%s\n", bold, reset)
+			fmt.Printf("  %s%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", bold, cyan, reset)
+			if len(result.PackagesInstalled) == 0 {
+				fmt.Printf("  %s📦 Packages%s   none\n", dim, reset)
+			} else {
+				fmt.Printf("  %s📦 Packages%s\n", dim, reset)
+				for _, p := range result.PackagesInstalled {
+					fmt.Printf("     %s✔%s  %s\n", green+bold, reset, p)
+				}
+			}
+			if len(result.FilesApplied) == 0 && len(result.FilesSkipped) == 0 {
+				fmt.Printf("  %s🗂  Configs%s    none\n", dim, reset)
+			} else {
+				fmt.Printf("  %s🗂  Configs%s\n", dim, reset)
+				for _, f := range result.FilesApplied {
+					fmt.Printf("     %s✔%s  %s\n", green+bold, reset, f)
+				}
+				for _, f := range result.FilesSkipped {
+					fmt.Printf("     %s⚠%s  %s %s(skipped — not found)%s\n", yellow, reset, f, dim, reset)
+				}
+			}
+			fmt.Printf("  %s%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", bold, cyan, reset)
+			fmt.Println()
+			Successln("All done! ✨")
 		},
 	}
 	applyCmd.Flags().StringVarP(&applyFile, "file", "f", "", "path to spec file (default: .dotsync.yaml in current directory)")
@@ -320,7 +348,7 @@ func runSync(daemon bool) {
 				// Convert spec to an ExecutionPlan resolved for this agent's OS.
 				executionPlan := spec.ToExecutionPlan(runtime.GOOS)
 
-				err = planExecutor.Execute(cmd.RunID, executionPlan)
+				_, err = planExecutor.Execute(cmd.RunID, executionPlan)
 				if err != nil {
 					Error("Policy Execution Failed: " + err.Error())
 				} else {
