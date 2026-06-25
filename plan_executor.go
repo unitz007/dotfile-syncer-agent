@@ -6,8 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+// allowedInstallPattern restricts broker-supplied install commands to the form
+// "<package-manager> install <package-name>" with no shell metacharacters.
+var allowedInstallPattern = regexp.MustCompile(`^(brew|apt|apt-get|dnf|yum|pacman|apk)\s+install\s+[A-Za-z0-9@._+=/-]+$`)
 
 type PlanExecutor struct {
 	config         *Configurations
@@ -50,15 +55,19 @@ func (e *PlanExecutor) Execute(runID string, plan *ExecutionPlan) error {
 
 func (e *PlanExecutor) executeInstall(runID string, commands []string) error {
 	for _, cmdStr := range commands {
-		e.reportStatus(runID, "running", fmt.Sprintf("Executing: %s", cmdStr))
-		
-		// Simple command execution (sh -c)
-		cmd := exec.Command("sh", "-c", cmdStr)
+		trimmed := strings.TrimSpace(cmdStr)
+		if !allowedInstallPattern.MatchString(trimmed) {
+			return fmt.Errorf("install command rejected (not in allowlist): %q", trimmed)
+		}
+		e.reportStatus(runID, "running", fmt.Sprintf("Executing: %s", trimmed))
+
+		parts := strings.Fields(trimmed)
+		cmd := exec.Command(parts[0], parts[1:]...) // #nosec G204 — validated above
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		
+
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("command '%s' failed: %w", cmdStr, err)
+			return fmt.Errorf("command '%s' failed: %w", trimmed, err)
 		}
 	}
 	return nil
@@ -94,11 +103,20 @@ func (e *PlanExecutor) executeFileSync(runID string, plan *ExecutionPlan) error 
 	}
 
 	// 2. Process Files
+	dotfileBase := filepath.Clean(e.config.DotfilePath)
 	for _, mapping := range plan.Files {
-		src := filepath.Join(e.config.DotfilePath, mapping.Source)
+		src := filepath.Clean(filepath.Join(dotfileBase, mapping.Source))
+		if !strings.HasPrefix(src, dotfileBase+string(filepath.Separator)) && src != dotfileBase {
+			return fmt.Errorf("source path escapes dotfile directory: %s", mapping.Source)
+		}
+
 		target, err := expandPath(mapping.Target)
 		if err != nil {
 			return fmt.Errorf("invalid target path '%s': %w", mapping.Target, err)
+		}
+		// Reject absolute target paths that aren't home-relative (~/...)
+		if filepath.IsAbs(mapping.Target) {
+			return fmt.Errorf("absolute target paths are not allowed: %s", mapping.Target)
 		}
 
 		e.reportStatus(runID, "running", fmt.Sprintf("Syncing %s -> %s", mapping.Source, target))
