@@ -1,0 +1,92 @@
+version: 2
+
+project_name: dotsync-agent
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod download
+
+builds:
+  - id: dotsync-agent
+    binary: dotsync-agent
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: dotsync-agent
+    ids:
+      - dotsync-agent
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    formats: [tar.gz]
+    files:
+      - README.md
+      - CHANGELOG.md
+      - example-dotfile-config.yaml
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: "New Features"
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: "Bug Fixes"
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: "Other"
+      order: 999
+
+homebrew_casks:
+  - name: dotsync-agent
+    ids:
+      - dotsync-agent
+    repository:
+      owner: unitz007
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/unitz007/dotfile-syncer"
+    description: "A lightweight agent that keeps your dotfiles in sync across machines"
+    license: "MIT"
+    binaries:
+      - dotsync-agent
+
+release:
+  github:
+    owner: unitz007
+    name: dotfile-syncer-agent
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+
+
+
+

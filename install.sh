@@ -4,7 +4,7 @@
 git pull origin main
 
 # build project
-go build -o dotfile-agent
+go build -o dotsync-agent .
 
 # move local to executable path
-sudo mv dotfile-agent /usr/local/bin
+sudo mv dotsync-agent /usr/local/bin

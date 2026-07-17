@@ -1,3 +1,4 @@
 .vscode/
 .idea/
 dev-env/
+dist/

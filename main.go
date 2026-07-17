@@ -18,6 +18,10 @@ var (
 	dotFilePath string
 	configDir   string
 
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+
 	// Registration flags
 	regMachineName string
 	regAgentToken  string
@@ -28,7 +32,9 @@ func main() {
 	var rootCmd = &cobra.Command{
 		Use:   "dotsync-agent",
 		Short: "Dotfile Syncer Agent",
+		Version: version,
 	}
+	rootCmd.SetVersionTemplate("{{printf \"%s\\n\" .Version}}")
 
 	rootCmd.PersistentFlags().StringVarP(&dotFilePath, "dotfile-path", "d", "", "path to dotfile directory")
 	rootCmd.PersistentFlags().StringVarP(&configDir, "config-dir", "c", "", "path to config directory")
@@ -73,6 +79,14 @@ func main() {
 		Short: "Run in daemon mode",
 		Run: func(cmd *cobra.Command, args []string) {
 			runSync(true)
+		},
+	}
+
+	var versionCmd = &cobra.Command{
+		Use:   "version",
+		Short: "Print build version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("version: %s\ncommit: %s\nbuilt: %s\n", version, commit, date)
 		},
 	}
 
@@ -240,7 +254,7 @@ then run:
 	_ = githubConnectCmd.MarkFlagRequired("token")
 	githubCmd.AddCommand(githubConnectCmd)
 
-	rootCmd.AddCommand(registerCmd, syncCmd, daemonCmd, applyCmd, githubCmd)
+	rootCmd.AddCommand(registerCmd, syncCmd, daemonCmd, applyCmd, githubCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		Error(err.Error())
