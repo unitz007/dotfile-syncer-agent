@@ -342,6 +342,31 @@ func runSync(daemon bool) {
 		runBootstrapSelfTest(brokerNotifier, config)
 	} else {
 		Infoln("Running in standalone mode (no broker)")
+
+		// Solo users configure their repo by hand-cloning it directly into DotfilePath
+		// (the documented/tested workflow — DotfilePath *is* the repo root, not a parent
+		// directory to clone into). config.GitRepository stays empty here, matching that
+		// invariant, so filepath.Join(DotfilePath, GitRepository) keeps resolving to
+		// DotfilePath everywhere else in the codebase (CloneOrPullRepository,
+		// applyDotsyncSpec, etc). Only GitHubRepoName is set, for the GitHub API call.
+		if config.GitUrl == "" {
+			repoPath := filepath.Join(config.DotfilePath, config.GitRepository)
+			if _, err := os.Stat(filepath.Join(repoPath, ".git")); err == nil {
+				if originURL, err := git.RemoteOriginURL(); err != nil {
+					Warnln("standalone mode: could not read origin remote from local clone: " + err.Error())
+				} else if owner, repo, err := ParseGitUrl(originURL); err != nil {
+					Warnln("standalone mode: could not parse origin URL " + originURL + ": " + err.Error())
+				} else {
+					config.GitUrl = originURL
+					config.GitApiBaseUrl = "https://api.github.com"
+					config.RepositoryOwner = owner
+					config.GitHubRepoName = repo
+					Infoln("Configured repository from local clone:", owner+"/"+repo)
+				}
+			} else {
+				Warnln("standalone mode: no local clone found at " + repoPath + " — continuous polling for new commits needs a pre-existing local clone with an 'origin' remote (clone your dotfiles repo there first)")
+			}
+		}
 	}
 
 	// Clone / pull repo when a URL is configured.

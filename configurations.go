@@ -15,9 +15,15 @@ type Configurations struct {
 	GithubToken     string // GitHub personal access token for API authentication
 	ConfigPath      string // Directory for agent configuration and database files
 	GitUrl          string // Full Git repository URL (e.g., https://github.com/user/repo.git)
-	GitRepository   string // Repository name extracted from GitUrl
+	GitRepository   string // Repository directory name, joined with DotfilePath to locate the local clone
 	RepositoryOwner string // Repository owner/organization extracted from GitUrl
 	GitApiBaseUrl   string // Base URL for Git API (default: https://api.github.com)
+	// GitHubRepoName is the repository name used for GitHub API calls (e.g. RemoteCommit).
+	// Normally identical to GitRepository. Kept separate for standalone mode, where
+	// DotfilePath already points directly at the local clone's root and GitRepository
+	// must stay empty so `filepath.Join(DotfilePath, GitRepository)` keeps resolving
+	// to DotfilePath itself. Falls back to GitRepository when unset.
+	GitHubRepoName string
 }
 
 // InitializeConfigurations creates and validates the agent configuration.
