@@ -72,6 +72,10 @@ func loadAgentIdentity(config *Configurations) (*AgentIdentity, error) {
 
 	identityPath := path.Join(config.ConfigPath, "agent_identity.json")
 
+	if info, err := os.Stat(identityPath); err == nil && info.Mode().Perm() != 0600 {
+		_ = os.Chmod(identityPath, 0600)
+	}
+
 	data, err := os.ReadFile(identityPath)
 	if err != nil {
 		if os.IsNotExist(err) {

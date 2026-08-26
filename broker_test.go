@@ -116,3 +116,50 @@ func TestAgentIdentityAllowsGitHubOnlyToken(t *testing.T) {
 		t.Fatalf("expected identity file to be written: %v", err)
 	}
 }
+
+func TestAgentIdentityPreservesBrokerAndGitHubFields(t *testing.T) {
+	config := &Configurations{ConfigPath: t.TempDir()}
+	identity := &AgentIdentity{
+		AgentToken:  "agent-token",
+		AgentID:     "agent-id",
+		MachineName: "workstation",
+		BrokerURL:   "https://broker.example",
+		GithubToken: "github-token",
+	}
+
+	if err := saveAgentIdentity(config, identity); err != nil {
+		t.Fatalf("saveAgentIdentity failed: %v", err)
+	}
+
+	loaded, err := loadAgentIdentity(config)
+	if err != nil {
+		t.Fatalf("loadAgentIdentity failed: %v", err)
+	}
+	if *loaded != *identity {
+		t.Fatalf("expected identity to round-trip, got %#v", loaded)
+	}
+}
+
+func TestLoadAgentIdentityRepairsLoosePermissions(t *testing.T) {
+	config := &Configurations{ConfigPath: t.TempDir()}
+	identity := &AgentIdentity{GithubToken: "github-token"}
+
+	if err := saveAgentIdentity(config, identity); err != nil {
+		t.Fatalf("saveAgentIdentity failed: %v", err)
+	}
+
+	identityPath := config.ConfigPath + "/agent_identity.json"
+	if err := os.Chmod(identityPath, 0644); err != nil {
+		t.Fatalf("failed to loosen identity file permissions: %v", err)
+	}
+	if _, err := loadAgentIdentity(config); err != nil {
+		t.Fatalf("loadAgentIdentity failed: %v", err)
+	}
+	info, err := os.Stat(identityPath)
+	if err != nil {
+		t.Fatalf("failed to stat identity file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("expected permissions 0600, got %o", got)
+	}
+}
