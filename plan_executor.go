@@ -335,8 +335,17 @@ func secureSourcePath(dotfileBase, source string) (string, error) {
 	if !pathWithinBase(filepath.Clean(baseReal), filepath.Clean(srcReal)) {
 		return "", fmt.Errorf("source symlink escapes dotfile directory")
 	}
-	if !srcInfo.IsDir() {
+	srcRealInfo, err := os.Stat(srcReal)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect resolved source path: %w", err)
+	}
+	if !srcInfo.IsDir() && !srcRealInfo.IsDir() {
 		return src, nil
+	}
+	if srcReal != src {
+		if err := ensureRepoSymlinksStayInside(baseReal, srcReal); err != nil {
+			return "", err
+		}
 	}
 
 	return src, nil

@@ -84,6 +84,29 @@ func TestSecureSourcePathRejectsNestedSymlinkEscapingDotfileDir(t *testing.T) {
 	}
 }
 
+func TestSecureSourcePathRejectsNestedSymlinkBehindSourceDirSymlink(t *testing.T) {
+	dotfileDir := t.TempDir()
+	outsideDir := t.TempDir()
+	realSourceDir := filepath.Join(dotfileDir, "real-nvim")
+	if err := os.Mkdir(realSourceDir, 0700); err != nil {
+		t.Fatalf("failed to create real source directory: %v", err)
+	}
+	if err := os.Symlink(realSourceDir, filepath.Join(dotfileDir, "nvim")); err != nil {
+		t.Fatalf("failed to create source directory symlink: %v", err)
+	}
+	outsideFile := filepath.Join(outsideDir, "secret")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0600); err != nil {
+		t.Fatalf("failed to write outside file: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(realSourceDir, "payload")); err != nil {
+		t.Fatalf("failed to create nested symlink: %v", err)
+	}
+
+	if _, err := secureSourcePath(dotfileDir, "nvim"); err == nil {
+		t.Fatal("expected nested escaping symlink behind a source directory symlink to be rejected")
+	}
+}
+
 func TestSecureSourcePathAllowsNormalRepoFile(t *testing.T) {
 	dotfileDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dotfileDir, ".zshrc"), []byte("ok"), 0600); err != nil {
