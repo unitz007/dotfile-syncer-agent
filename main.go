@@ -351,18 +351,19 @@ func runSync(daemon bool) {
 		}
 	}
 
-	syncer := NewEnhancedSyncer(config, brokerNotifier, mutex, git)
+	planExecutor := NewPlanExecutor(config, brokerNotifier, git)
 
 	// Initial Sync
 	Infoln("Starting sync...")
-	syncer.Sync()
-	Successln("Sync completed 🔄")
+	if err := applyDotsyncSpec(config, git, planExecutor, "initial-sync"); err != nil {
+		Error("Initial sync failed: " + err.Error())
+	} else {
+		Successln("Sync completed 🔄")
+	}
 
 	if !daemon {
 		return
 	}
-
-	planExecutor := NewPlanExecutor(config, brokerNotifier, git)
 
 	if brokerNotifier != nil {
 		// ── Broker-mode background services ───────────────────────────────────
@@ -437,7 +438,9 @@ func runSync(daemon bool) {
 			mutex.Lock()
 			defer mutex.Unlock()
 			Infoln("Triggering Priority Sync")
-			syncer.Sync()
+			if err := applyDotsyncSpec(config, git, planExecutor, "priority-sync"); err != nil {
+				Error("Priority sync failed: " + err.Error())
+			}
 			if err := brokerNotifier.AckPrioritySyncCommand(); err != nil {
 				Error("Failed to ack priority sync: " + err.Error())
 			}
@@ -457,25 +460,7 @@ func runSync(daemon bool) {
 		Infoln("Standalone daemon started — polling GitHub for changes every 30s")
 
 		applySpec := func() {
-			if err := git.CloneOrPullRepository(); err != nil {
-				Error("git pull failed: " + err.Error())
-				return
-			}
-			repoPath := filepath.Join(config.DotfilePath, config.GitRepository)
-			spec, err := LoadSpecFromRepo(repoPath)
-			if err != nil {
-				Error("could not read .dotsync.yaml: " + err.Error())
-				return
-			}
-			if spec == nil {
-				Warnln("no .dotsync.yaml in repo — nothing to apply")
-				return
-			}
-			if err := spec.Validate(); err != nil {
-				Error("spec validation failed: " + err.Error())
-				return
-			}
-			if _, err := planExecutor.Execute("standalone", spec.ToExecutionPlan(runtime.GOOS)); err != nil {
+			if err := applyDotsyncSpec(config, git, planExecutor, "standalone"); err != nil {
 				Error("sync failed: " + err.Error())
 			} else {
 				Successln("Sync completed 🔄")
