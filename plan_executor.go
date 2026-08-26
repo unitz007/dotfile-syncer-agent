@@ -13,7 +13,7 @@ import (
 
 // allowedInstallPattern restricts broker-supplied install commands to the form
 // "<package-manager> install <package-name>" with no shell metacharacters.
-var allowedInstallPattern = regexp.MustCompile(`^(brew|apt|apt-get|dnf|yum|pacman|apk)\s+install\s+[A-Za-z0-9@._+=/-]+$`)
+var allowedInstallPattern = regexp.MustCompile(`^(brew|apt|apt-get|dnf|yum|pacman|apk)\s+install\s+[A-Za-z0-9][A-Za-z0-9@._+=-]*$`)
 
 // ApplyResult collects what happened during an Execute call.
 type ApplyResult struct {
@@ -139,14 +139,14 @@ func (e *PlanExecutor) executeSoftwareUnit(runID string, unit SoftwareUnit, stra
 
 	dotfileBase := filepath.Clean(e.config.DotfilePath)
 	for _, mapping := range unit.Files {
-		src := filepath.Clean(filepath.Join(dotfileBase, mapping.Source))
-		if !strings.HasPrefix(src, dotfileBase+string(filepath.Separator)) && src != dotfileBase {
-			Warnln(fmt.Sprintf("[%s] source path escapes dotfile dir, skipping: %s", unit.Name, mapping.Source))
+		src, err := secureSourcePath(dotfileBase, mapping.Source)
+		if err != nil {
+			Warnln(fmt.Sprintf("[%s] invalid source, skipping: %s", unit.Name, mapping.Source))
 			result.FilesSkipped = append(result.FilesSkipped, mapping.Source+" (path traversal rejected)")
 			continue
 		}
-		target, err := expandPath(mapping.Target)
-		if err != nil || filepath.IsAbs(mapping.Target) {
+		target, err := secureTargetPath(mapping.Target)
+		if err != nil {
 			Warnln(fmt.Sprintf("[%s] invalid target, skipping: %s", unit.Name, mapping.Target))
 			result.FilesSkipped = append(result.FilesSkipped, mapping.Source+" (invalid target)")
 			continue
@@ -176,6 +176,9 @@ func (e *PlanExecutor) executeInstall(runID string, commands []string) ([]string
 		// parts: [manager, "install", pkg]
 		parts := strings.Fields(trimmed)
 		manager, pkg := parts[0], parts[2]
+		if !validPackageName(pkg) {
+			return installed, fmt.Errorf("install command rejected (unsafe package name): %q", trimmed)
+		}
 
 		if isPackageInstalled(manager, pkg) {
 			Infoln(fmt.Sprintf("already installed, skipping: %s", pkg))
@@ -225,17 +228,14 @@ func isPackageInstalled(manager, pkg string) bool {
 func (e *PlanExecutor) executeFileSyncFlat(runID string, plan *ExecutionPlan, result *ApplyResult) error {
 	dotfileBase := filepath.Clean(e.config.DotfilePath)
 	for _, mapping := range plan.Files {
-		src := filepath.Clean(filepath.Join(dotfileBase, mapping.Source))
-		if !strings.HasPrefix(src, dotfileBase+string(filepath.Separator)) && src != dotfileBase {
-			return fmt.Errorf("source path escapes dotfile directory: %s", mapping.Source)
+		src, err := secureSourcePath(dotfileBase, mapping.Source)
+		if err != nil {
+			return fmt.Errorf("invalid source path %q: %w", mapping.Source, err)
 		}
 
-		target, err := expandPath(mapping.Target)
+		target, err := secureTargetPath(mapping.Target)
 		if err != nil {
 			return fmt.Errorf("invalid target path '%s': %w", mapping.Target, err)
-		}
-		if filepath.IsAbs(mapping.Target) {
-			return fmt.Errorf("absolute target paths are not allowed: %s", mapping.Target)
 		}
 
 		if _, err := os.Stat(src); os.IsNotExist(err) {
@@ -264,7 +264,7 @@ func (e *PlanExecutor) reportStatus(runID, status string, message interface{}) {
 
 // Helper functions
 
-func expandPath(pathStr string) (string, error) {
+func expandHomePath(pathStr string) (string, error) {
 	if strings.HasPrefix(pathStr, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -273,6 +273,119 @@ func expandPath(pathStr string) (string, error) {
 		return filepath.Join(home, pathStr[2:]), nil
 	}
 	return pathStr, nil
+}
+
+func secureTargetPath(pathStr string) (string, error) {
+	if !strings.HasPrefix(pathStr, "~/") {
+		return "", fmt.Errorf("target must use ~/ prefix")
+	}
+	if pathHasTraversal(pathStr[2:]) {
+		return "", fmt.Errorf("target must not contain path traversal")
+	}
+
+	target, err := expandHomePath(pathStr)
+	if err != nil {
+		return "", err
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if !pathWithinBase(filepath.Clean(home), filepath.Clean(target)) {
+		return "", fmt.Errorf("target escapes home directory")
+	}
+	return target, nil
+}
+
+func secureSourcePath(dotfileBase, source string) (string, error) {
+	if filepath.IsAbs(source) {
+		return "", fmt.Errorf("source must be relative")
+	}
+	if pathHasTraversal(source) {
+		return "", fmt.Errorf("source must not contain path traversal")
+	}
+
+	base := filepath.Clean(dotfileBase)
+	src := filepath.Clean(filepath.Join(base, source))
+	if !pathWithinBase(base, src) {
+		return "", fmt.Errorf("source escapes dotfile directory")
+	}
+
+	baseReal, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve dotfile directory: %w", err)
+	}
+	srcInfo, err := os.Lstat(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return src, nil
+		}
+		return "", fmt.Errorf("failed to inspect source path: %w", err)
+	}
+
+	if err := ensureRepoSymlinksStayInside(baseReal, src); err != nil {
+		return "", err
+	}
+
+	srcReal, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve source path: %w", err)
+	}
+	if !pathWithinBase(filepath.Clean(baseReal), filepath.Clean(srcReal)) {
+		return "", fmt.Errorf("source symlink escapes dotfile directory")
+	}
+	if !srcInfo.IsDir() {
+		return src, nil
+	}
+
+	return src, nil
+}
+
+func ensureRepoSymlinksStayInside(baseReal, src string) error {
+	return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink == 0 {
+			return nil
+		}
+
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return fmt.Errorf("failed to resolve source symlink %q: %w", path, err)
+		}
+		if !pathWithinBase(filepath.Clean(baseReal), filepath.Clean(resolved)) {
+			return fmt.Errorf("source symlink %q escapes dotfile directory", path)
+		}
+		return nil
+	})
+}
+
+func pathWithinBase(base, candidate string) bool {
+	rel, err := filepath.Rel(base, candidate)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+func pathHasTraversal(pathStr string) bool {
+	for _, part := range strings.FieldsFunc(pathStr, func(r rune) bool {
+		return r == '/' || r == '\\'
+	}) {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func validPackageName(pkg string) bool {
+	if pkg == "" || strings.HasPrefix(pkg, ".") || strings.HasPrefix(pkg, "-") {
+		return false
+	}
+	return !strings.ContainsAny(pkg, `/\`)
 }
 
 func installFile(src, target, strategy string) error {

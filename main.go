@@ -405,7 +405,11 @@ func runSync(daemon bool) {
 					continue
 				}
 
-				_, err = planExecutor.Execute(cmd.RunID, spec.ToExecutionPlan(runtime.GOOS))
+				_, err = func() (*ApplyResult, error) {
+					mutex.Lock()
+					defer mutex.Unlock()
+					return planExecutor.Execute(cmd.RunID, spec.ToExecutionPlan(runtime.GOOS))
+				}()
 				if err != nil {
 					Error("Policy Execution Failed: " + err.Error())
 				} else {

@@ -24,12 +24,12 @@ type SpecMetadata struct {
 }
 
 type SyncPolicySpecBody struct {
-	Repository string          `yaml:"repository" json:"repository"`
-	Branch     string          `yaml:"branch"     json:"branch"`
-	Strategy   string          `yaml:"strategy"   json:"strategy"`
-	Mode       string          `yaml:"mode"       json:"mode"`
-	Software   []SpecSoftware  `yaml:"software"   json:"software"`
-	Hooks      SpecHooks       `yaml:"hooks"      json:"hooks"`
+	Repository string         `yaml:"repository" json:"repository"`
+	Branch     string         `yaml:"branch"     json:"branch"`
+	Strategy   string         `yaml:"strategy"   json:"strategy"`
+	Mode       string         `yaml:"mode"       json:"mode"`
+	Software   []SpecSoftware `yaml:"software"   json:"software"`
+	Hooks      SpecHooks      `yaml:"hooks"      json:"hooks"`
 }
 
 // SpecSoftware groups a named software unit's packages and config file mappings.
@@ -102,11 +102,17 @@ func (s *SyncPolicySpec) Validate() error {
 				if strings.TrimSpace(pkg.Name) == "" {
 					return fmt.Errorf("spec.software[%d].packages[%s][%d]: package name must be non-empty", i, osKey, j)
 				}
+				if !validPackageName(pkg.Name) {
+					return fmt.Errorf("spec.software[%d].packages[%s][%d]: package name %q is unsafe", i, osKey, j, pkg.Name)
+				}
 			}
 		}
 		for j, f := range sw.Configs {
 			if strings.TrimSpace(f.Source) == "" {
 				return fmt.Errorf("spec.software[%d].configs[%d]: source must be non-empty", i, j)
+			}
+			if filepath.IsAbs(f.Source) {
+				return fmt.Errorf("spec.software[%d].configs[%d]: source %q must be relative", i, j, f.Source)
 			}
 			if strings.Contains(f.Source, "..") {
 				return fmt.Errorf("spec.software[%d].configs[%d]: source %q must not contain \"..\"", i, j, f.Source)
@@ -114,7 +120,13 @@ func (s *SyncPolicySpec) Validate() error {
 			if strings.TrimSpace(f.Target) == "" {
 				return fmt.Errorf("spec.software[%d].configs[%d]: target must be non-empty", i, j)
 			}
-			// ~/... paths are home-relative, not absolute — they are allowed.
+			if !strings.HasPrefix(f.Target, "~/") {
+				return fmt.Errorf("spec.software[%d].configs[%d]: target %q must start with \"~/\"", i, j, f.Target)
+			}
+			if pathHasTraversal(f.Target[2:]) {
+				return fmt.Errorf("spec.software[%d].configs[%d]: target %q must not contain \"..\"", i, j, f.Target)
+			}
+			// ~/... paths are home-relative, not absolute -- they are allowed.
 			if filepath.IsAbs(f.Target) {
 				return fmt.Errorf("spec.software[%d].configs[%d]: target %q must not be an absolute path (use ~/... instead)", i, j, f.Target)
 			}
