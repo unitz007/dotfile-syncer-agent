@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -195,26 +195,75 @@ func enhancedSyncSteps(git *Git) []struct {
 		{
 			Step: "Copy dotfiles to configured locations",
 			Action: func() error {
+				var errs []error
 				for _, configPathInfo := range configPathsInfo {
-					// Create parent directory if it doesn't exist
-					parentDir, _ := path.Split(configPathInfo.Dest)
-					if _, err := os.Stat(parentDir); err != nil {
-						if err := os.MkdirAll(parentDir, os.ModePerm); err != nil {
-							return fmt.Errorf("failed to create directory %s: %w", parentDir, err)
-						}
+					src := configPathInfo.Src.Name()
+					if err := copyPath(src, configPathInfo.Dest); err != nil {
+						errs = append(errs, fmt.Errorf("could not copy %s to %s: %w", src, configPathInfo.Dest, err))
+						continue
 					}
 
-					// Copy file or directory
-					_, err := exec.Command("cp", "-r", configPathInfo.Src.Name(), configPathInfo.Dest).CombinedOutput()
-					if err != nil {
-						return fmt.Errorf("could not copy %s to %s: %w", configPathInfo.Src.Name(), configPathInfo.Dest, err)
-					}
-
-					Infoln(fmt.Sprintf("Synced: %s -> %s", configPathInfo.Src.Name(), configPathInfo.Dest))
+					Infoln(fmt.Sprintf("Synced: %s -> %s", src, configPathInfo.Dest))
 				}
 
-				return nil
+				return errors.Join(errs...)
 			},
 		},
 	}
+}
+
+// copyPath copies src (file or directory) to dest, always replacing whatever
+// is currently at dest — including an existing symlink, which is removed
+// rather than followed. This keeps the git repo as the sole source of truth:
+// syncing never silently writes through a stale link into some other location,
+// and never merges into an existing directory's contents.
+func copyPath(src, dest string) error {
+	if _, err := os.Lstat(dest); err == nil {
+		if err := os.RemoveAll(dest); err != nil {
+			return fmt.Errorf("failed to remove existing %s: %w", dest, err)
+		}
+	}
+
+	info, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("failed to stat source %s: %w", src, err)
+	}
+
+	if info.IsDir() {
+		return copyDir(src, dest)
+	}
+	return copyFile(src, dest)
+}
+
+func copyDir(src, dest string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dest, os.ModePerm); err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		destPath := filepath.Join(dest, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, destPath); err != nil {
+				return err
+			}
+			continue
+		}
+
+		_, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if err := copyFile(srcPath, destPath); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

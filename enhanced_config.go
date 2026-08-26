@@ -99,12 +99,15 @@ func (c *EnhancedConfig) GetConfigPaths(repoDir string) ([]ConfigPathInfo, error
 			// Replace 'home' with actual home directory
 			targetPath := strings.ReplaceAll(fileSpec.Target, "home", homeDir)
 
-			// Construct full destination path
-			destPath := path.Join(targetPath, fileSpec.Path)
-
 			// Check if it's a directory (ends with ;)
 			isDir := strings.HasSuffix(fileSpec.Path, ";")
 			cleanPath := strings.TrimSuffix(fileSpec.Path, ";")
+
+			// Destination is the target directory plus the source's own
+			// basename — target already names the destination directory,
+			// so joining the full source path here would nest it twice
+			// (e.g. ssh/config under target home/.ssh becoming .ssh/ssh/config).
+			destPath := path.Join(targetPath, path.Base(cleanPath))
 
 			// Source file in repository
 			srcPath := path.Join(repoDir, cleanPath)
@@ -116,7 +119,7 @@ func (c *EnhancedConfig) GetConfigPaths(repoDir string) ([]ConfigPathInfo, error
 
 			configPaths = append(configPaths, ConfigPathInfo{
 				Src:   srcFile,
-				Dest:  strings.TrimSuffix(destPath, ";"),
+				Dest:  destPath,
 				IsDir: isDir,
 			})
 		}
