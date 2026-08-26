@@ -19,7 +19,12 @@ type Git struct {
 // RemoteCommit fetches the latest commit from the remote GitHub repository using the GitHub API.
 // Returns the commit SHA and timestamp of the HEAD commit on the default branch.
 func (g Git) RemoteCommit() (*Commit, error) {
-	gitUrl, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/commits", g.config.GitApiBaseUrl, g.config.RepositoryOwner, g.config.GitRepository))
+	repoName := g.config.GitHubRepoName
+	if repoName == "" {
+		repoName = g.config.GitRepository
+	}
+
+	gitUrl, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/commits", g.config.GitApiBaseUrl, g.config.RepositoryOwner, repoName))
 	if err != nil {
 		return nil, err
 	}
@@ -96,6 +101,28 @@ func (g Git) LocalCommit() (*Commit, error) {
 		Time: commitTime,
 	}
 	return commit, nil
+}
+
+// RemoteOriginURL returns the URL configured for the local repository's "origin" remote.
+// Used to derive repository details (owner/repo/API base) for standalone/solo setups
+// where no broker is configured to supply this information.
+func (g Git) RemoteOriginURL() (string, error) {
+	err := os.Chdir(g.config.DotfilePath + string(os.PathSeparator) + g.config.GitRepository)
+	if err != nil {
+		return "", err
+	}
+
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		return "", err
+	}
+
+	output, err := exec.Command(gitPath, "remote", "get-url", "origin").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git remote get-url origin failed: %s, output: %s", err, string(output))
+	}
+
+	return strings.TrimSpace(string(output)), nil
 }
 
 // IsSync compares local and remote commits to determine if they are synchronized.

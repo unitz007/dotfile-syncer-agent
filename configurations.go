@@ -15,9 +15,15 @@ type Configurations struct {
 	GithubToken     string // GitHub personal access token for API authentication
 	ConfigPath      string // Directory for agent configuration and database files
 	GitUrl          string // Full Git repository URL (e.g., https://github.com/user/repo.git)
-	GitRepository   string // Repository name extracted from GitUrl
+	GitRepository   string // Repository directory name, joined with DotfilePath to locate the local clone
 	RepositoryOwner string // Repository owner/organization extracted from GitUrl
 	GitApiBaseUrl   string // Base URL for Git API (default: https://api.github.com)
+	// GitHubRepoName is the repository name used for GitHub API calls (e.g. RemoteCommit).
+	// Normally identical to GitRepository. Kept separate for standalone mode, where
+	// DotfilePath already points directly at the local clone's root and GitRepository
+	// must stay empty so `filepath.Join(DotfilePath, GitRepository)` keeps resolving
+	// to DotfilePath itself. Falls back to GitRepository when unset.
+	GitHubRepoName string
 }
 
 // InitializeConfigurations creates and validates the agent configuration.
@@ -103,9 +109,18 @@ func InitializeConfigurations(
 }
 
 func ParseGitUrl(gitUrl string) (owner, repo string, err error) {
-	// Basic parsing for https://github.com/owner/repo.git or https://github.com/owner/repo
+	// Handles https://github.com/owner/repo(.git) and SCP-style SSH remotes
+	// like git@github.com:owner/repo(.git) — the latter is what `git clone`
+	// produces by default for SSH remotes and what `git remote get-url origin`
+	// returns verbatim, so it has to parse cleanly here too.
 	gitUrl = strings.TrimSuffix(gitUrl, "/")
 	gitUrl = strings.TrimSuffix(gitUrl, ".git")
+
+	if !strings.Contains(gitUrl, "://") {
+		if colonIdx := strings.LastIndex(gitUrl, ":"); colonIdx != -1 {
+			gitUrl = gitUrl[colonIdx+1:]
+		}
+	}
 
 	parts := strings.Split(gitUrl, "/")
 	if len(parts) < 2 {

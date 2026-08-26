@@ -72,6 +72,10 @@ func loadAgentIdentity(config *Configurations) (*AgentIdentity, error) {
 
 	identityPath := path.Join(config.ConfigPath, "agent_identity.json")
 
+	if info, err := os.Stat(identityPath); err == nil && info.Mode().Perm() != 0600 {
+		_ = os.Chmod(identityPath, 0600)
+	}
+
 	data, err := os.ReadFile(identityPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -90,7 +94,7 @@ func loadAgentIdentity(config *Configurations) (*AgentIdentity, error) {
 		return nil, err
 	}
 
-	if identity.AgentToken == "" {
+	if identity.AgentToken == "" && identity.GithubToken == "" {
 		return nil, fmt.Errorf("agent identity missing token")
 	}
 
@@ -98,7 +102,10 @@ func loadAgentIdentity(config *Configurations) (*AgentIdentity, error) {
 }
 
 func saveAgentIdentity(config *Configurations, identity *AgentIdentity) error {
-	if config == nil || config.ConfigPath == "" || identity == nil || identity.AgentToken == "" {
+	if config == nil || config.ConfigPath == "" || identity == nil {
+		return nil
+	}
+	if identity.AgentToken == "" && identity.GithubToken == "" {
 		return nil
 	}
 
