@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 )
 
@@ -93,5 +94,25 @@ func TestBrokerNotifier_NextPolicyRunCommand_NoRun(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Error("Expected nil command when has_run=false")
+	}
+}
+
+func TestAgentIdentityAllowsGitHubOnlyToken(t *testing.T) {
+	config := &Configurations{ConfigPath: t.TempDir()}
+	identity := &AgentIdentity{GithubToken: "test-token"}
+
+	if err := saveAgentIdentity(config, identity); err != nil {
+		t.Fatalf("saveAgentIdentity failed: %v", err)
+	}
+
+	loaded, err := loadAgentIdentity(config)
+	if err != nil {
+		t.Fatalf("loadAgentIdentity failed: %v", err)
+	}
+	if loaded.GithubToken != identity.GithubToken {
+		t.Fatalf("expected GitHub token to round-trip")
+	}
+	if _, err := os.Stat(config.ConfigPath + "/agent_identity.json"); err != nil {
+		t.Fatalf("expected identity file to be written: %v", err)
 	}
 }

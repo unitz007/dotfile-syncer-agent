@@ -90,7 +90,7 @@ func loadAgentIdentity(config *Configurations) (*AgentIdentity, error) {
 		return nil, err
 	}
 
-	if identity.AgentToken == "" {
+	if identity.AgentToken == "" && identity.GithubToken == "" {
 		return nil, fmt.Errorf("agent identity missing token")
 	}
 
@@ -98,7 +98,10 @@ func loadAgentIdentity(config *Configurations) (*AgentIdentity, error) {
 }
 
 func saveAgentIdentity(config *Configurations, identity *AgentIdentity) error {
-	if config == nil || config.ConfigPath == "" || identity == nil || identity.AgentToken == "" {
+	if config == nil || config.ConfigPath == "" || identity == nil {
+		return nil
+	}
+	if identity.AgentToken == "" && identity.GithubToken == "" {
 		return nil
 	}
 
