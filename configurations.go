@@ -109,9 +109,18 @@ func InitializeConfigurations(
 }
 
 func ParseGitUrl(gitUrl string) (owner, repo string, err error) {
-	// Basic parsing for https://github.com/owner/repo.git or https://github.com/owner/repo
+	// Handles https://github.com/owner/repo(.git) and SCP-style SSH remotes
+	// like git@github.com:owner/repo(.git) — the latter is what `git clone`
+	// produces by default for SSH remotes and what `git remote get-url origin`
+	// returns verbatim, so it has to parse cleanly here too.
 	gitUrl = strings.TrimSuffix(gitUrl, "/")
 	gitUrl = strings.TrimSuffix(gitUrl, ".git")
+
+	if !strings.Contains(gitUrl, "://") {
+		if colonIdx := strings.LastIndex(gitUrl, ":"); colonIdx != -1 {
+			gitUrl = gitUrl[colonIdx+1:]
+		}
+	}
 
 	parts := strings.Split(gitUrl, "/")
 	if len(parts) < 2 {
