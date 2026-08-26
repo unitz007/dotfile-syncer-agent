@@ -670,3 +670,48 @@ func min(a, b time.Duration) time.Duration {
 	}
 	return b
 }
+
+// notifyStatus reports the current local/remote commit status to the broker,
+// including any error from the most recent sync attempt. No-op when no broker
+// is configured (nil notifier — e.g. standalone mode), since SyncStatus has a
+// value receiver and would otherwise panic dereferencing a nil pointer.
+func notifyStatus(git *Git, notifier *BrokerNotifier, lastError string) {
+	if notifier == nil {
+		return
+	}
+
+	localCommit, _ := git.LocalCommit()
+	remoteCommit, _ := git.RemoteCommit()
+
+	// Handle case where commit might be nil/empty (e.g. fresh repo)
+	localDate := ""
+	if localCommit != nil {
+		localDate = localCommit.Time
+	}
+
+	remoteDate := ""
+	if remoteCommit != nil {
+		remoteDate = remoteCommit.Time
+	}
+
+	localId := ""
+	if localCommit != nil {
+		localId = localCommit.Id
+	}
+
+	remoteId := ""
+	if remoteCommit != nil {
+		remoteId = remoteCommit.Id
+	}
+
+	status := SyncStatus{
+		LocalCommit:      localId,
+		LocalCommitTime:  localDate,
+		RemoteCommit:     remoteId,
+		RemoteCommitTime: remoteDate,
+		LastSyncTime:     time.Now().Format(time.RFC3339), // Use current time for sync timestamp
+		IsSync:           false,                           // Final status is not "syncing" (which implies in-progress)
+		Error:            lastError,
+	}
+	notifier.SyncStatus(status)
+}

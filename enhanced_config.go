@@ -3,9 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"path"
 	"runtime"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -84,48 +82,6 @@ func (c *EnhancedConfig) GetInstallCommands() map[string]string {
 // GetPlatform returns the current operating system platform
 func GetPlatform() string {
 	return runtime.GOOS // Returns: linux, darwin, windows, freebsd, openbsd, etc.
-}
-
-// GetConfigPaths converts the enhanced config to ConfigPathInfo format
-func (c *EnhancedConfig) GetConfigPaths(repoDir string) ([]ConfigPathInfo, error) {
-	var configPaths []ConfigPathInfo
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	for _, entry := range c.Dotfiles {
-		for _, fileSpec := range entry.Files {
-			// Replace 'home' with actual home directory
-			targetPath := strings.ReplaceAll(fileSpec.Target, "home", homeDir)
-
-			// Check if it's a directory (ends with ;)
-			isDir := strings.HasSuffix(fileSpec.Path, ";")
-			cleanPath := strings.TrimSuffix(fileSpec.Path, ";")
-
-			// Destination is the target directory plus the source's own
-			// basename — target already names the destination directory,
-			// so joining the full source path here would nest it twice
-			// (e.g. ssh/config under target home/.ssh becoming .ssh/ssh/config).
-			destPath := path.Join(targetPath, path.Base(cleanPath))
-
-			// Source file in repository
-			srcPath := path.Join(repoDir, cleanPath)
-			srcFile, err := os.Open(srcPath)
-			if err != nil {
-				// Skip if file doesn't exist in repo
-				continue
-			}
-
-			configPaths = append(configPaths, ConfigPathInfo{
-				Src:   srcFile,
-				Dest:  destPath,
-				IsDir: isDir,
-			})
-		}
-	}
-
-	return configPaths, nil
 }
 
 // GetSoftwareList returns a list of all software defined in the config
