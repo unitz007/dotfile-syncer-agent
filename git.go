@@ -66,7 +66,7 @@ func (g Git) RemoteCommit() (*Commit, error) {
 // LocalCommit retrieves the latest commit from the local Git repository.
 // It executes 'git log HEAD -1' to get the most recent commit information.
 func (g Git) LocalCommit() (*Commit, error) {
-	err := os.Chdir(g.config.DotfilePath + string(os.PathSeparator) + g.config.GitRepository)
+	err := os.Chdir(g.config.LocalRepositoryPath())
 	if err != nil {
 		return nil, err
 	}
@@ -118,29 +118,39 @@ func (g Git) CloneOrPullRepository() error {
 	}
 
 	return func() error {
-		repoPath := path.Join(g.config.DotfilePath, g.config.GitRepository)
+		repoPath := g.config.LocalRepositoryPath()
 		_, err = os.Stat(repoPath) // checks if repo already exists
 		if err != nil {
 			// Repository doesn't exist, clone it
+			if g.config.GitUrl == "" {
+				return fmt.Errorf("repository not found at %s and no git URL is configured", repoPath)
+			}
 			Infoln("Repository not found, cloning from:", g.config.GitUrl)
-			if _, err := os.Stat(g.config.DotfilePath); os.IsNotExist(err) {
-				if err := os.MkdirAll(g.config.DotfilePath, 0755); err != nil {
+			cloneParent := g.config.DotfilePath
+			cloneArgs := []string{"clone", g.config.GitUrl}
+			if g.config.RepoAtDotfilePath {
+				cloneParent = path.Dir(g.config.DotfilePath)
+				cloneArgs = append(cloneArgs, g.config.DotfilePath)
+			}
+
+			if _, err := os.Stat(cloneParent); os.IsNotExist(err) {
+				if err := os.MkdirAll(cloneParent, 0755); err != nil {
 					return fmt.Errorf("failed to create dotfile path: %w", err)
 				}
 			}
 
-			err = os.Chdir(g.config.DotfilePath)
+			err = os.Chdir(cloneParent)
 			if err != nil {
 				return err
 			}
 
-			err = exec.Command(git, "clone", g.config.GitUrl).Run()
+			err = exec.Command(git, cloneArgs...).Run()
 			if err != nil {
 				return err
 			}
 
 			Successln("Clone successful 📦")
-			return os.Chdir(g.config.GitRepository)
+			return os.Chdir(repoPath)
 		} else {
 			// Repository exists, pull latest changes
 			Infoln("Repository exists, pulling latest changes from:", repoPath)

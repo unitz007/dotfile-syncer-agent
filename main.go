@@ -17,6 +17,7 @@ import (
 var (
 	dotFilePath string
 	configDir   string
+	gitURL      string
 
 	version = "dev"
 	commit  = "none"
@@ -30,14 +31,15 @@ var (
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "dotsync-agent",
-		Short: "Dotfile Syncer Agent",
+		Use:     "dotsync-agent",
+		Short:   "Dotfile Syncer Agent",
 		Version: version,
 	}
 	rootCmd.SetVersionTemplate("{{printf \"%s\\n\" .Version}}")
 
 	rootCmd.PersistentFlags().StringVarP(&dotFilePath, "dotfile-path", "d", "", "path to dotfile directory")
 	rootCmd.PersistentFlags().StringVarP(&configDir, "config-dir", "c", "", "path to config directory")
+	rootCmd.PersistentFlags().StringVar(&gitURL, "git-url", "", "git repository URL for standalone sync")
 
 	var registerCmd = &cobra.Command{
 		Use:   "register",
@@ -113,7 +115,7 @@ Examples:
 			// Resolve spec file path: explicit flag → dotfiles repo root → cwd.
 			specPath := applyFile
 			if specPath == "" {
-				specPath = filepath.Join(config.DotfilePath, config.GitRepository, ".dotsync.yaml")
+				specPath = filepath.Join(config.LocalRepositoryPath(), ".dotsync.yaml")
 			}
 
 			// Read and parse the spec
@@ -320,6 +322,10 @@ func runSync(daemon bool) {
 	// Broker notifier is only created when a broker URL and agent token are present.
 	var brokerNotifier *BrokerNotifier
 	if identity != nil && identity.BrokerURL != "" && identity.AgentToken != "" {
+		if gitURL != "" {
+			Warnln("--git-url is ignored in broker mode; repository config comes from the broker")
+		}
+
 		brokerNotifier = NewBrokerNotifier(git, identity.AgentID, identity.AgentToken, identity.MachineName, identity.BrokerURL)
 		Infoln("Broker connected:", identity.BrokerURL)
 
@@ -342,6 +348,18 @@ func runSync(daemon bool) {
 		runBootstrapSelfTest(brokerNotifier, config)
 	} else {
 		Infoln("Running in standalone mode (no broker)")
+		if gitURL != "" {
+			config.GitUrl = gitURL
+			config.GitApiBaseUrl = "https://api.github.com"
+			config.RepoAtDotfilePath = true
+			if owner, repo, err := ParseGitUrl(gitURL); err != nil {
+				Warnln("could not parse git URL: " + err.Error())
+			} else {
+				config.RepositoryOwner = owner
+				config.GitRepository = repo
+				Infoln("Configured repository:", owner+"/"+repo)
+			}
+		}
 	}
 
 	// Clone / pull repo when a URL is configured.
@@ -382,7 +400,7 @@ func runSync(daemon bool) {
 
 				Infoln("Received Policy Run:", cmd.RunID)
 
-				repoPath := filepath.Join(config.DotfilePath, config.GitRepository)
+				repoPath := config.LocalRepositoryPath()
 				repoSpec, err := LoadSpecFromRepo(repoPath)
 				if err != nil {
 					_ = brokerNotifier.ReportPolicyRunResult(cmd.RunID, "failed", map[string]string{
@@ -461,7 +479,7 @@ func runSync(daemon bool) {
 				Error("git pull failed: " + err.Error())
 				return
 			}
-			repoPath := filepath.Join(config.DotfilePath, config.GitRepository)
+			repoPath := config.LocalRepositoryPath()
 			spec, err := LoadSpecFromRepo(repoPath)
 			if err != nil {
 				Error("could not read .dotsync.yaml: " + err.Error())

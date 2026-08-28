@@ -4,20 +4,22 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
 // Configurations holds all configuration settings for the dotfile agent
 type Configurations struct {
-	DotfilePath     string // Local directory where dotfiles repository is cloned
-	WebHook         string // Git webhook URL for receiving push notifications
-	Port            string // HTTP port for the agent server
-	GithubToken     string // GitHub personal access token for API authentication
-	ConfigPath      string // Directory for agent configuration and database files
-	GitUrl          string // Full Git repository URL (e.g., https://github.com/user/repo.git)
-	GitRepository   string // Repository name extracted from GitUrl
-	RepositoryOwner string // Repository owner/organization extracted from GitUrl
-	GitApiBaseUrl   string // Base URL for Git API (default: https://api.github.com)
+	DotfilePath       string // Local directory where dotfiles repository is cloned
+	WebHook           string // Git webhook URL for receiving push notifications
+	Port              string // HTTP port for the agent server
+	GithubToken       string // GitHub personal access token for API authentication
+	ConfigPath        string // Directory for agent configuration and database files
+	GitUrl            string // Full Git repository URL (e.g., https://github.com/user/repo.git)
+	GitRepository     string // Repository name extracted from GitUrl
+	RepositoryOwner   string // Repository owner/organization extracted from GitUrl
+	GitApiBaseUrl     string // Base URL for Git API (default: https://api.github.com)
+	RepoAtDotfilePath bool   // True when DotfilePath is the repository root instead of a parent directory
 }
 
 // InitializeConfigurations creates and validates the agent configuration.
@@ -103,9 +105,13 @@ func InitializeConfigurations(
 }
 
 func ParseGitUrl(gitUrl string) (owner, repo string, err error) {
-	// Basic parsing for https://github.com/owner/repo.git or https://github.com/owner/repo
+	// Basic parsing for https://github.com/owner/repo.git,
+	// https://github.com/owner/repo, or git@github.com:owner/repo.git.
 	gitUrl = strings.TrimSuffix(gitUrl, "/")
 	gitUrl = strings.TrimSuffix(gitUrl, ".git")
+	if strings.Contains(gitUrl, ":") && !strings.Contains(gitUrl, "://") {
+		gitUrl = strings.Replace(gitUrl, ":", "/", 1)
+	}
 
 	parts := strings.Split(gitUrl, "/")
 	if len(parts) < 2 {
@@ -116,4 +122,14 @@ func ParseGitUrl(gitUrl string) (owner, repo string, err error) {
 	owner = parts[len(parts)-2]
 
 	return owner, repo, nil
+}
+
+func (c *Configurations) LocalRepositoryPath() string {
+	if c == nil {
+		return ""
+	}
+	if c.RepoAtDotfilePath || c.GitRepository == "" {
+		return c.DotfilePath
+	}
+	return filepath.Join(c.DotfilePath, c.GitRepository)
 }
