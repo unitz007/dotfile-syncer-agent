@@ -41,7 +41,10 @@ func (e enhancedSync) Sync(consumers ...Consumer) {
 			IsSync:       true,
 			LastSyncTime: "", // Empty indicates start
 		}
-		e.brokerNotifier.SyncStatus(status)
+
+		if e.brokerNotifier != nil {
+			e.brokerNotifier.SyncStatus(status)
+		}
 	}()
 
 	go func() {
@@ -86,7 +89,9 @@ func (e enhancedSync) Sync(consumers ...Consumer) {
 	}()
 
 	consumers = append(consumers, func(event SyncEvent) {
-		e.brokerNotifier.SyncEvent(event)
+		if e.brokerNotifier != nil {
+			e.brokerNotifier.SyncEvent(event)
+		}
 	})
 
 	var lastError string
@@ -106,6 +111,10 @@ func (e enhancedSync) Sync(consumers ...Consumer) {
 }
 
 func notifyStatus(git *Git, notifier *BrokerNotifier, lastError string) {
+	if notifier == nil {
+		return
+	}
+
 	localCommit, _ := git.LocalCommit()
 	remoteCommit, _ := git.RemoteCommit()
 

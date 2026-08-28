@@ -55,8 +55,6 @@ func (g Git) RemoteCommit() (*Commit, error) {
 
 	headCommit := responseBody[0]
 
-	Infoln("RemoteCommit: fetched SHA:", headCommit.Sha)
-
 	commit := &Commit{
 		Id:   headCommit.Sha,
 		Time: headCommit.Commit.Author.Date,
